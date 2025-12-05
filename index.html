@@ -7,7 +7,7 @@
   body { font-family: Arial, sans-serif; padding: 20px; }
   textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
   table { border-collapse: collapse; margin-bottom: 30px; }
-  th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+  th, td { border: 1px solid #333; padding: 5px 10px; }
   th { background-color: #f2f2f2; }
   .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
 </style>
@@ -16,10 +16,10 @@
 
 <h2>Subscription Analyzer</h2>
 
-<label>Paste Purchase Data (7-column table, tab-separated):</label>
+<label>Paste Purchase Data:</label>
 <textarea id="purchaseData"></textarea>
 
-<label>Paste Claim Data (9-column table, tab-separated):</label>
+<label>Paste Claim Data:</label>
 <textarea id="claimData"></textarea>
 
 <button onclick="analyze()">Analyze</button>
@@ -33,150 +33,125 @@ const PACKS = {
   90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
 };
 const SUB_DURATION_DAYS = 7;
-const UTC_OFFSET = -8; // UTC-8 server time
+const UTC_OFFSET = -8; // UTC-8
 
-function parsePurchases(text) {
-  const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
-  const purchases = [];
-  for(let i = 0; i < lines.length; i++) {
-    if(lines[i].toLowerCase().includes('sub_pack')) {
-      const prevLine = i>0 ? lines[i-1] : null;
-      if(!prevLine) continue;
-      const cols = prevLine.split('\t');
-      const ts = new Date(cols[0]);
+function parsePurchases(text){
+  const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
+  const purchases=[];
+  for(let i=0;i<lines.length;i++){
+    if(lines[i].toLowerCase().includes("sub_pack")){
+      const prev = i>0 ? lines[i-1] : null;
+      if(!prev) continue;
+      const ts = new Date(prev.split("\t")[0]);
       const nextLine = (i+1)<lines.length ? lines[i+1] : lines[i];
-      const amtMatch = nextLine.match(/\d+(\.\d+)?/);
-      if(!amtMatch) continue;
-      const amt = parseFloat(amtMatch[0]);
-      if(PACKS[amt]) {
-        purchases.push({purchase_ts: ts, pack_amount: amt, pack_name: PACKS[amt].name});
-      }
+      const amt = parseFloat(nextLine.match(/\d+(\.\d+)?/)[0]);
+      if(PACKS[amt]) purchases.push({purchase_ts: ts, pack_amount: amt, pack_name: PACKS[amt].name});
     }
   }
   return purchases;
 }
 
-function parseClaims(text) {
-  const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
-  const claims = [];
-  for(let ln of lines) {
-    const cols = ln.split('\t');
-    if(cols.length < 9) continue;
-    const sc = parseFloat(cols[0]);
-    const gc = parseInt(cols[1]);
-    const ts = new Date(cols[cols.length-1]);
-    let pack_name = null;
+function parseClaims(text){
+  const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
+  const claims=[];
+  for(let ln of lines){
+    const cols = ln.split("\t");
+    if(cols.length<9) continue;
+    const sc=parseFloat(cols[0]);
+    const gc=parseInt(cols[1]);
+    const ts=new Date(cols[cols.length-1]);
+    let pack_name=null;
     for(let amt in PACKS){
-      if(PACKS[amt].sc === sc && PACKS[amt].gc === gc){
-        pack_name = PACKS[amt].name;
-        break;
-      }
+      if(PACKS[amt].sc===sc && PACKS[amt].gc===gc) { pack_name=PACKS[amt].name; break; }
     }
     if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
   }
   return claims;
 }
 
-function addDays(date, days){ 
-  return new Date(date.getTime() + days*24*60*60*1000); 
-}
-
-function toUTC8(date){
-  return new Date(date.getTime() + UTC_OFFSET*60*60*1000);
-}
+function addDays(date, days){ return new Date(date.getTime() + days*24*60*60*1000); }
+function toUTC8(date){ return new Date(date.getTime() + UTC_OFFSET*3600*1000); }
 
 function computeIntervals(purchases){
-  const intervals = [];
+  const intervals=[];
   for(let amt in PACKS){
-    const packName = PACKS[amt].name;
-    let packPurchases = purchases.filter(p => p.pack_amount==parseFloat(amt));
-    packPurchases.sort((a,b)=>a.purchase_ts-b.purchase_ts);
-    let currentEnd = null;
+    const packName=PACKS[amt].name;
+    let packPurchases=purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
+    let currentEnd=null;
     for(let p of packPurchases){
-      let start = p.purchase_ts;
-      if(currentEnd && start<=currentEnd) start = currentEnd;
-      let end = addDays(start, SUB_DURATION_DAYS);
-      intervals.push({pack_name: packName, pack_amount: parseFloat(amt), purchase_ts: p.purchase_ts, start, end});
-      currentEnd = end;
+      let start=p.purchase_ts;
+      if(currentEnd && start<=currentEnd) start=currentEnd;
+      let end=addDays(start,SUB_DURATION_DAYS);
+      intervals.push({pack_name: packName, pack_amount: parseFloat(amt), purchase_ts:p.purchase_ts, start, end});
+      currentEnd=end;
     }
   }
-  intervals.sort((a,b)=>a.start-b.start);
-  return intervals;
+  return intervals.sort((a,b)=>a.start-b.start);
 }
 
 function computeDayWindows(start){
-  const windows = [];
-  const startUTC8 = toUTC8(start);
+  const windows=[];
+  const startUTC8=toUTC8(start);
   for(let i=0;i<SUB_DURATION_DAYS;i++){
     let dayStartUTC8, dayEndUTC8;
     if(i===0){
-      dayStartUTC8 = startUTC8;
-      dayEndUTC8 = new Date(dayStartUTC8);
-      dayEndUTC8.setHours(24,0,0,0); // next midnight UTC-8
+      dayStartUTC8=startUTC8;
+      dayEndUTC8=new Date(dayStartUTC8); dayEndUTC8.setHours(24,0,0,0);
     } else {
-      dayStartUTC8 = new Date(startUTC8);
-      dayStartUTC8.setHours(0,0,0,0);
-      dayStartUTC8.setDate(dayStartUTC8.getDate()+i);
-      dayEndUTC8 = addDays(dayStartUTC8,1);
+      dayStartUTC8=new Date(startUTC8); dayStartUTC8.setHours(0,0,0,0); dayStartUTC8.setDate(dayStartUTC8.getDate()+i);
+      dayEndUTC8=addDays(dayStartUTC8,1);
     }
     windows.push({day_label:`Day${i+1}`, day_start:new Date(dayStartUTC8.getTime()-UTC_OFFSET*3600*1000), day_end:new Date(dayEndUTC8.getTime()-UTC_OFFSET*3600*1000)});
   }
   return windows;
 }
 
-function mapClaimsToInterval(interval, claims){
-  const windows = computeDayWindows(interval.start);
-  const dayResults = [];
+function mapClaims(interval, claims){
+  const windows=computeDayWindows(interval.start);
+  const results=[];
   for(let w of windows){
-    let claim = claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.day_start && c.claim_ts<w.day_end);
-    dayResults.push({
-      day_label: w.day_label,
-      status: claim ? "Claimed":"Missed",
-      claim_ts_utc0: claim? claim.claim_ts : null,
-      claim_ts_utc8: claim? toUTC8(claim.claim_ts): null
+    let claim=claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.day_start && c.claim_ts<w.day_end);
+    results.push({
+      day_label:w.day_label,
+      status: claim?"Claimed":"Missed",
+      claim_utc0: claim?claim.claim_ts:null,
+      claim_utc8: claim?toUTC8(claim.claim_ts):null
     });
   }
-  return dayResults;
+  return results;
 }
 
 function createTable(interval, dayResults){
-  let table = document.createElement('table');
-  let header = table.insertRow();
-  let th = document.createElement('th');
-  th.colSpan=4;
-  th.className="header";
-  th.innerText=interval.pack_name;
-  header.appendChild(th);
+  const table=document.createElement("table");
+  const header=table.insertRow(); 
+  const th=document.createElement("th"); th.colSpan=4; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
-  let purchaseRow = table.insertRow();
-  purchaseRow.insertCell().innerText="Purchase UTC-0";
-  purchaseRow.insertCell().innerText="";
-  purchaseRow.insertCell().innerText=interval.purchase_ts.toISOString();
-  purchaseRow.insertCell().innerText=toUTC8(interval.purchase_ts).toISOString();
+  const pRow=table.insertRow();
+  pRow.insertCell().innerText="Purchase UTC-0";
+  pRow.insertCell().innerText="";
+  pRow.insertCell().innerText=interval.purchase_ts.toISOString();
+  pRow.insertCell().innerText=toUTC8(interval.purchase_ts).toISOString();
 
   for(let d of dayResults){
-    let row = table.insertRow();
+    const row=table.insertRow();
     row.insertCell().innerText=d.day_label;
     row.insertCell().innerText=d.status;
-    row.insertCell().innerText=d.claim_ts_utc0? d.claim_ts_utc0.toISOString() : "";
-    row.insertCell().innerText=d.claim_ts_utc8? d.claim_ts_utc8.toISOString() : "";
+    row.insertCell().innerText=d.claim_utc0? d.claim_utc0.toISOString():"";
+    row.insertCell().innerText=d.claim_utc8? d.claim_utc8.toISOString():"";
   }
   return table;
 }
 
 function analyze(){
-  const purchaseText = document.getElementById("purchaseData").value;
-  const claimText = document.getElementById("claimData").value;
-  const purchases = parsePurchases(purchaseText);
-  const claims = parseClaims(claimText);
-  const intervals = computeIntervals(purchases);
-  const resultsDiv = document.getElementById("results");
+  const purchases=parsePurchases(document.getElementById("purchaseData").value);
+  const claims=parseClaims(document.getElementById("claimData").value);
+  const intervals=computeIntervals(purchases);
+  const resultsDiv=document.getElementById("results");
   resultsDiv.innerHTML="";
-  for(let interval of intervals){
-    const dayResults = mapClaimsToInterval(interval, claims);
-    const table = createTable(interval, dayResults);
-    resultsDiv.appendChild(table);
-  }
+  intervals.forEach(interval=>{
+    const dayResults=mapClaims(interval,claims);
+    resultsDiv.appendChild(createTable(interval,dayResults));
+  });
 }
 </script>
 
