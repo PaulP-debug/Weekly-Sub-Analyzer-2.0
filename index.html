@@ -7,14 +7,24 @@
   body { font-family: Arial, sans-serif; padding: 20px; }
   textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
   button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
-  table { border-collapse: collapse; margin-bottom: 30px; width: 100%; }
-  th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+  table { border-collapse: collapse; margin-bottom: 30px; width: 100%; table-layout: fixed; }
+  th, td { border: 1px solid #999; padding: 8px 10px; text-align: left; transition: background-color 0.3s; }
   th { background-color: #f2f2f2; }
   .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
   .subheader { background-color: #fcf8e3; font-weight: bold; text-align: center; }
-  .claimed { background-color: #d4edda; color: #155724; }   /* green */
-  .missed { background-color: #f8d7da; color: #721c24; }    /* red */
-  .future { background-color: #e2e3e5; color: #6c757d; }    /* gray */
+  
+  /* Lighter shades for status */
+  .claimed { background-color: #e6f4ea; color: #155724; }
+  .missed { background-color: #f9e6e6; color: #721c24; }
+  .future { background-color: #f0f0f0; color: #6c757d; }
+
+  /* Hover effect for cells */
+  td.claimed:hover { background-color: #d0ebd5; cursor: pointer; }
+  td.missed:hover { background-color: #f5c6c6; cursor: pointer; }
+  td.future:hover { background-color: #e0e0e0; cursor: pointer; }
+
+  /* Subtle table shadow on hover */
+  table:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
 </style>
 </head>
 <body>
@@ -39,8 +49,8 @@ const PACKS = {
 };
 const SUB_DURATION_DAYS = 7;
 
-// Format Date as YYYY-MM-DD HH:MM (UTC)
-function formatDate(date){
+// Format Date as YYYY-MM-DD HH:MM (UTC 24-hour)
+function formatDateUTC(date){
   if(!date) return "";
   const pad = n => n.toString().padStart(2,"0");
   const y = date.getUTCFullYear();
@@ -51,7 +61,7 @@ function formatDate(date){
   return `${y}-${m}-${d} ${h}:${min}`;
 }
 
-// UTC-8 conversion
+// UTC-8 conversion (Server/PST)
 function toUTC8(date){
   return new Date(date.getTime() - 8*3600*1000);
 }
@@ -64,7 +74,8 @@ function parsePurchases(text){
     if(lines[i].toLowerCase().includes("sub_pack")){
       const prev = i>0 ? lines[i-1] : null;
       if(!prev) continue;
-      const ts = new Date(prev.split("\t")[0]);
+      // Force UTC parsing
+      const ts = new Date(prev.split("\t")[0] + "Z");
       const nextLine = (i+1)<lines.length ? lines[i+1] : lines[i];
       const amtMatch = nextLine.match(/\d+(\.\d+)?/);
       if(!amtMatch) continue;
@@ -88,7 +99,8 @@ function parseClaims(text){
       if(scgcLine.length<2) continue;
       const sc=parseFloat(scgcLine[0]);
       const gc=parseInt(scgcLine[1]);
-      const ts=new Date(dateMatch[0]);
+      // Force UTC parsing
+      const ts=new Date(dateMatch[0] + "Z");
       let pack_name=null;
       for(let amt in PACKS){
         if(PACKS[amt].sc===sc && PACKS[amt].gc===gc){ pack_name=PACKS[amt].name; break; }
@@ -146,7 +158,7 @@ function computeDayWindows(purchase_ts){
 function mapClaims(interval, claims){
   const windows = computeDayWindows(interval.purchase_ts);
   const results=[];
-  const now=new Date(); // current Backend time
+  const now=new Date(); // current Backend time (UTC)
   for(let w of windows){
     const claim = claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.start && c.claim_ts<w.end);
     let status="", backend=null, pst=null;
@@ -178,8 +190,8 @@ function createTable(interval, dayResults){
 
   // Row 2: Purchase info
   const pRow=table.insertRow();
-  pRow.insertCell().innerText=`Backend: ${formatDate(interval.purchase_ts)}`;
-  pRow.insertCell().innerText=`Server Time: ${formatDate(toUTC8(interval.purchase_ts))}`;
+  pRow.insertCell().innerText=`Backend: ${formatDateUTC(interval.purchase_ts)}`;
+  pRow.insertCell().innerText=`Server Time: ${formatDateUTC(toUTC8(interval.purchase_ts))}`;
 
   // Row 3: Days header
   const subHeader=table.insertRow();
@@ -194,8 +206,8 @@ function createTable(interval, dayResults){
     const row=table.insertRow();
     let backendText="", pstText="", cls="";
     if(d.status==="Claimed"){
-      backendText=formatDate(d.claim_utc0);
-      pstText=formatDate(d.claim_utc8);
+      backendText=formatDateUTC(d.claim_utc0);
+      pstText=formatDateUTC(d.claim_utc8);
       cls="claimed";
     } else if(d.status==="Missed"){
       backendText="Missed";
