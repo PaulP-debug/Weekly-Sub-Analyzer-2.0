@@ -1,1 +1,255 @@
+"""
+subscription_analyzer.py
+
+Analyzer for weekly game subscriptions (Sub Pack 07, 30, 90) and daily claim tracking.
+
+Features:
+- Parse purchase data (7-column table) and claim data (9-column table)
+- Handle UTC-0 → UTC-8 conversion for accurate day calculations
+- Compute subscription intervals with proper Day1–Day7 boundaries (08:00 UTC-0 reset)
+- Handle subscription extensions (new interval starts after previous Day7)
+- Map claims to subscriptions and mark Claimed/Missed
+- Output tables ready for export (pandas DataFrame)
+
+Author: Paul P (example)
+"""
+
+from datetime import datetime, timedelta
+import pandas as pd
+import re
+
+# -----------------------------
+# Configuration
+PACKS = {
+    7.00: {"name": "Sub Pack 07", "sc": 0.50, "gc": 2000},
+    30.00: {"name": "Sub Pack 30", "sc": 2.00, "gc": 10000},
+    90.00: {"name": "Sub Pack 90", "sc": 5.50, "gc": 40000},
+}
+SUB_DURATION_DAYS = 7
+UTC_OFFSET = -8  # UTC-8 server time
+
+# -----------------------------
+# Utility Functions
+
+def to_utc8(ts_utc0: datetime) -> datetime:
+    """Convert UTC-0 timestamp to UTC-8"""
+    return ts_utc0 + timedelta(hours=UTC_OFFSET)
+
+def parse_purchase_lines(purchase_text: str):
+    """
+    Parse raw purchase text and return list of valid purchases
+    Each purchase is a dict: {purchase_ts_utc0, pack_amount, pack_name}
+    Only rows containing 'sub_pack' are considered
+    """
+    lines = [ln.strip() for ln in purchase_text.strip().splitlines() if ln.strip()]
+    purchases = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if "sub_pack" in line.lower():
+            # previous line contains timestamp (first column)
+            prev_line = lines[i-1] if i > 0 else ""
+            cols = prev_line.split("\t")
+            if not cols:
+                i += 1
+                continue
+            try:
+                ts_str = cols[0]
+                purchase_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                i += 1
+                continue
+            # current line (i) or next line contains amount
+            amount_line = lines[i+1] if (i+1) < len(lines) else line
+            try:
+                amount = float(re.findall(r"\d+(?:\.\d+)?", amount_line)[0])
+            except Exception:
+                i += 1
+                continue
+            if amount not in PACKS:
+                i += 1
+                continue
+            purchases.append({
+                "purchase_ts_utc0": purchase_ts,
+                "pack_amount": amount,
+                "pack_name": PACKS[amount]["name"]
+            })
+        i += 1
+    return purchases
+
+def parse_claim_lines(claim_text: str):
+    """
+    Parse raw claim text and return list of claims
+    Each claim is a dict: {claim_ts_utc0, sc, gc, pack_name}
+    """
+    lines = [ln.strip() for ln in claim_text.strip().splitlines() if ln.strip()]
+    claims = []
+    for ln in lines:
+        cols = ln.split("\t")
+        if len(cols) < 9:
+            continue
+        try:
+            sc = float(cols[0])
+            gc = int(float(cols[1]))
+            claim_ts = datetime.strptime(cols[-1], "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            continue
+        # detect pack by SC/GC
+        pack_name = None
+        for amt, info in PACKS.items():
+            if info["sc"] == sc and info["gc"] == gc:
+                pack_name = info["name"]
+                break
+        if pack_name:
+            claims.append({
+                "claim_ts_utc0": claim_ts,
+                "sc": sc,
+                "gc": gc,
+                "pack_name": pack_name
+            })
+    return claims
+
+# -----------------------------
+# Core Analyzer
+
+def compute_subscription_intervals(purchases):
+    """
+    Compute subscription intervals per pack.
+    Each purchase creates a 7-day interval starting at purchase time.
+    If same pack is purchased while previous interval still active, new interval starts after previous Day7 ends.
+    """
+    intervals = []
+    for pack_amount, info in PACKS.items():
+        pack_name = info["name"]
+        # filter purchases for this pack
+        pack_purchases = [p for p in purchases if p["pack_amount"] == pack_amount]
+        pack_purchases.sort(key=lambda x: x["purchase_ts_utc0"])
+        current_end = None
+        for p in pack_purchases:
+            start = p["purchase_ts_utc0"]
+            if current_end and start <= current_end:
+                # extend: new interval starts after current_end
+                start = current_end
+            end = start + timedelta(days=SUB_DURATION_DAYS)
+            intervals.append({
+                "pack_name": pack_name,
+                "pack_amount": pack_amount,
+                "purchase_ts_utc0": p["purchase_ts_utc0"],
+                "start_utc0": start,
+                "end_utc0": end
+            })
+            current_end = end
+    # sort all intervals by start
+    intervals.sort(key=lambda x: x["start_utc0"])
+    return intervals
+
+def compute_day_windows(start_utc0):
+    """
+    Compute Day1..Day7 windows in UTC-0 based on 08:00 reset (server UTC-8 midnight)
+    Returns list of (day_label, day_start_utc0, day_end_utc0)
+    """
+    windows = []
+    # Convert to UTC-8 for server day calculations
+    start_utc8 = to_utc8(start_utc0)
+    for i in range(SUB_DURATION_DAYS):
+        if i == 0:
+            day_start_utc8 = start_utc8
+            # Day1 ends at next 00:00 UTC-8 (midnight)
+            next_midnight_utc8 = datetime.combine(day_start_utc8.date() + timedelta(days=1), datetime.min.time())
+            day_end_utc8 = next_midnight_utc8
+        else:
+            day_start_utc8 = datetime.combine(start_utc8.date(), datetime.min.time()) + timedelta(days=i)
+            day_end_utc8 = day_start_utc8 + timedelta(days=1)
+        # convert back to UTC-0 for storage
+        day_start_utc0 = day_start_utc8 - timedelta(hours=UTC_OFFSET)
+        day_end_utc0 = day_end_utc8 - timedelta(hours=UTC_OFFSET)
+        windows.append((f"Day{i+1}", day_start_utc0, day_end_utc0))
+    return windows
+
+def map_claims_to_subscription(interval, claims):
+    """
+    Map claims to subscription days (Day1..Day7)
+    Returns list of dicts: [{day_label, status, claim_ts_utc0, claim_ts_utc8}, ...]
+    """
+    windows = compute_day_windows(interval["start_utc0"])
+    day_results = []
+    for day_label, day_start, day_end in windows:
+        # find claim within this day
+        claim_ts = None
+        for c in claims:
+            if c["pack_name"] == interval["pack_name"]:
+                if day_start <= c["claim_ts_utc0"] < day_end:
+                    claim_ts = c["claim_ts_utc0"]
+                    break
+        if claim_ts:
+            day_results.append({
+                "day_label": day_label,
+                "status": "Claimed",
+                "claim_ts_utc0": claim_ts,
+                "claim_ts_utc8": to_utc8(claim_ts)
+            })
+        else:
+            day_results.append({
+                "day_label": day_label,
+                "status": "Missed",
+                "claim_ts_utc0": None,
+                "claim_ts_utc8": None
+            })
+    return day_results
+
+def generate_subscription_tables(purchases_text, claims_text):
+    """
+    Main entry point.
+    Returns list of subscription tables as pandas DataFrames
+    """
+    purchases = parse_purchase_lines(purchases_text)
+    claims = parse_claim_lines(claims_text)
+    intervals = compute_subscription_intervals(purchases)
+    tables = []
+    for interval in intervals:
+        day_results = map_claims_to_subscription(interval, claims)
+        # build DataFrame
+        rows = []
+        # header
+        rows.append({
+            "Day": f"=== {interval['pack_name']} ===",
+            "Status": "",
+            "Claim UTC-0": "",
+            "Claim UTC-8": ""
+        })
+        # purchase info
+        rows.append({
+            "Day": "Purchase UTC-0",
+            "Status": "",
+            "Claim UTC-0": interval["purchase_ts_utc0"],
+            "Claim UTC-8": to_utc8(interval["purchase_ts_utc0"])
+        })
+        # daily claims
+        for d in day_results:
+            rows.append({
+                "Day": d["day_label"],
+                "Status": d["status"],
+                "Claim UTC-0": d["claim_ts_utc0"],
+                "Claim UTC-8": d["claim_ts_utc8"]
+            })
+        df = pd.DataFrame(rows)
+        tables.append(df)
+    return tables
+
+# -----------------------------
+# Example usage
+if __name__ == "__main__":
+    # Sample paste data
+    purchase_text = """
+2025-12-02 15:59:17\t61421661-20251202155902-45908277\t20251202-155909-597183-285192191\temerchant_credit_api\t20\tstart_pack\t10.00
+2025-12-02 15:37:22\t61419991-20251202153703-45908277\t20251202-153714-464837-032152415\temerchant_credit_api\t43\tsub_pack\t7.00
+"""
+    claim_text = """
+0.50\t2000\t0.02\t0.10\t13066759\tWeekly Subscription\t0\t0\t2025-12-01 20:58:21
+"""
+    tables = generate_subscription_tables(purchase_text, claim_text)
+    # Print all tables
+    for df in tables:
+        print(df.to_string(index=False))
+        print("\n" + "="*50 + "\n")
 
