@@ -7,7 +7,7 @@
   body { font-family: Arial, sans-serif; padding: 20px; }
   textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
   button { padding: 10px 20px; font-size: 16px; margin-bottom: 10px; }
-  table { border-collapse: collapse; margin-bottom: 30px; width: 100%; table-layout: fixed; }
+  table { border-collapse: collapse; margin-bottom: 20px; width: 100%; table-layout: fixed; }
   th, td { border: 1px solid #999; padding: 8px 10px; text-align: left; transition: background-color 0.3s; }
   th { background-color: #f2f2f2; }
   .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
@@ -117,18 +117,20 @@ function computeIntervals(purchases){
   for(let amt in PACKS){
     const packName=PACKS[amt].name;
     let packPurchases=purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
-    let currentStart=null, currentEnd=null;
-    for(let p of packPurchases){
-      let start=p.purchase_ts;
-      let end=new Date(start.getTime()+SUB_DURATION_DAYS*24*3600*1000);
-      if(currentEnd && start<=currentEnd){ // extension
-        currentEnd=new Date(currentEnd.getTime()+SUB_DURATION_DAYS*24*3600*1000);
+    if(packPurchases.length===0) continue;
+    let start=packPurchases[0].purchase_ts;
+    let end=new Date(start.getTime()+SUB_DURATION_DAYS*24*3600*1000);
+    for(let i=1;i<packPurchases.length;i++){
+      const p=packPurchases[i];
+      if(p.purchase_ts<=end){ // extend
+        end=new Date(end.getTime()+SUB_DURATION_DAYS*24*3600*1000);
       } else { // new interval
-        currentStart=start;
-        currentEnd=end;
+        intervals.push({pack_name:packName, purchase_start:start, purchase_end:end});
+        start=p.purchase_ts;
+        end=new Date(start.getTime()+SUB_DURATION_DAYS*24*3600*1000);
       }
     }
-    if(currentStart) intervals.push({pack_name:packName, purchase_start:currentStart, purchase_end:currentEnd});
+    intervals.push({pack_name:packName, purchase_start:start, purchase_end:end});
   }
   return intervals.sort((a,b)=>a.purchase_start-b.purchase_start);
 }
@@ -171,6 +173,12 @@ function mapClaims(interval, claims){
 
 // Create table
 function createTable(interval, dayResults, idx){
+  const container=document.createElement("div");
+
+  const toggleBtn=document.createElement("button");
+  toggleBtn.innerText="Show/Hide Future Days for "+interval.pack_name;
+  toggleBtn.style.margin="10px 0";
+
   const table=document.createElement("table");
 
   // Row 1: header
@@ -194,18 +202,6 @@ function createTable(interval, dayResults, idx){
   const cell2=subHeader.insertCell();
   cell2.innerText="PST (UTC-8)";
   subHeader.className="subheader";
-
-  // Future toggle button
-  const toggleBtn=document.createElement("button");
-  toggleBtn.innerText="Show/Hide Future Days";
-  toggleBtn.style.margin="10px 0";
-  toggleBtn.onclick=function(){
-    const futureRows=table.querySelectorAll("tr.future");
-    futureRows.forEach(r=>{
-      r.style.display=r.style.display==="none"?"table-row":"none";
-    });
-  };
-  table.parentNode?.insertBefore(toggleBtn, table);
 
   // Day rows
   dayResults.forEach(d=>{
@@ -233,7 +229,17 @@ function createTable(interval, dayResults, idx){
     c2.className=cls;
   });
 
-  return table;
+  toggleBtn.onclick=function(){
+    const futureRows=table.querySelectorAll("tr.future");
+    futureRows.forEach(r=>{
+      r.style.display=r.style.display==="none"?"table-row":"none";
+    });
+  };
+
+  container.appendChild(toggleBtn);
+  container.appendChild(table);
+
+  return container;
 }
 
 // Main analyze
