@@ -19,10 +19,10 @@
 
 <h2>Subscription Analyzer</h2>
 
-<h3>Paste Purchase Data (7 columns, tab-delimited)</h3>
+<h3>Paste Purchase Data (7-column table, tab-separated)</h3>
 <textarea id="purchaseData" placeholder="Paste purchase data here..."></textarea>
 
-<h3>Paste Claim Data (9 columns, tab-delimited)</h3>
+<h3>Paste Claim Data (9-column table, tab-separated)</h3>
 <textarea id="claimData" placeholder="Paste claim data here..."></textarea>
 
 <button onclick="analyze()">Analyze</button>
@@ -35,7 +35,6 @@ const PACKS = {
   30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000, duration: 7},
   90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000, duration: 7},
 };
-
 const UTC_OFFSET = -8; // server time (PST)
 
 // ---------------- Parsing -----------------
@@ -105,7 +104,8 @@ function analyze() {
   for (const pack in intervals) {
     for (const interval of intervals[pack]) {
       const now = new Date();
-      // Compute number of days in interval up to now (hide future)
+
+      // Compute number of days up to now
       const totalDays = Math.ceil((Math.min(interval.end, now) - interval.start)/(24*3600*1000));
       const totalDaysToShow = totalDays>0?totalDays:0;
 
