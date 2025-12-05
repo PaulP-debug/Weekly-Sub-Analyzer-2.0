@@ -2,161 +2,173 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Subscription Analyzer</title>
+<title>Weekly Subscription Analyzer</title>
 <style>
-  body { font-family: Arial, sans-serif; padding: 20px; }
+  body { font-family: Arial, sans-serif; margin: 20px; }
   textarea { width: 100%; height: 150px; margin-bottom: 10px; font-family: monospace; }
-  table { border-collapse: collapse; margin-bottom: 30px; width: 100%; }
-  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
-  th { background-color: #f2f2f2; }
-  .header { font-weight: bold; background-color: #e0e0e0; }
-  .claimed { background-color: #d4edda; }
-  .missed { background-color: #f8d7da; }
-  .future { background-color: #fff3cd; }
+  table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+  th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
+  th { background-color: #eee; }
+  .claimed { background-color: #b6fcb6; }
+  .missed { background-color: #fcb6b6; }
 </style>
 </head>
 <body>
 
-<h2>Subscription Analyzer</h2>
+<h2>Weekly Subscription Analyzer</h2>
 
-<h3>Paste Purchase Data (7-column table, tab-separated)</h3>
-<textarea id="purchaseData" placeholder="Paste purchase data here..."></textarea>
+<label>Paste Purchase Data (7-column table, tab-separated):</label>
+<textarea id="purchaseData"></textarea>
 
-<h3>Paste Claim Data (9-column table, tab-separated)</h3>
-<textarea id="claimData" placeholder="Paste claim data here..."></textarea>
+<label>Paste Claim Data (9-column table, tab-separated):</label>
+<textarea id="claimData"></textarea>
 
 <button onclick="analyze()">Analyze</button>
 
-<div id="result"></div>
+<div id="output"></div>
 
 <script>
 const PACKS = {
-  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000, duration: 7},
-  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000, duration: 7},
-  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000, duration: 7},
+  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000},
+  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000},
+  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
 };
-const UTC_OFFSET = -8; // server time (PST)
+const SUB_DURATION_DAYS = 7;
+const UTC_OFFSET = -8; // PST server
 
-// ---------------- Parsing -----------------
 function parsePurchases(text) {
-  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l);
-  const purchases = [];
-  for (let i=0; i<lines.length; i++) {
-    if (lines[i].toLowerCase() === "sub_pack") {
-      const prevLine = lines[i-1] || "";
-      const tsStr = prevLine.split("\t")[0];
-      const amtLine = lines[i+1] || lines[i];
-      const amount = parseFloat(amtLine.match(/\d+(\.\d+)?/)[0]);
-      if (PACKS[amount]) purchases.push({ts: new Date(tsStr), amount: amount, pack: PACKS[amount].name});
+  let lines = text.trim().split("\n");
+  let purchases = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].toLowerCase().includes("sub_pack")) {
+      let prev = lines[i-1].split("\t");
+      let dt = new Date(prev[0]);
+      let amount = parseFloat(lines[i+1]);
+      if (PACKS[amount]) {
+        purchases.push({purchaseDate: dt, amount: amount, name: PACKS[amount].name});
+      }
     }
   }
-  return purchases.sort((a,b)=>a.ts-b.ts);
+  return purchases;
 }
 
 function parseClaims(text) {
-  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l);
-  const claims = [];
-  for (let i=0; i<lines.length; i++) {
-    const cols = lines[i].split("\t");
+  let lines = text.trim().split("\n");
+  let claims = [];
+  for (let i = 0; i < lines.length; i++) {
+    let cols = lines[i].split("\t");
     if (cols.length < 9) continue;
-    const sc = parseFloat(cols[0]);
-    const gc = parseInt(parseFloat(cols[1]));
-    const tsStr = cols[cols.length-1];
-    const ts = new Date(tsStr);
+    let sc = parseFloat(cols[0]);
+    let gc = parseInt(parseFloat(cols[1]));
+    let dt = new Date(cols[8]);
     let packName = null;
-    for (const amt in PACKS) if (PACKS[amt].sc === sc && PACKS[amt].gc === gc) packName = PACKS[amt].name;
-    if (packName) claims.push({ts, pack: packName});
-  }
-  return claims.sort((a,b)=>a.ts-b.ts);
-}
-
-// ---------------- Format -----------------
-function formatDateUTC0(d) {
-  const dt = new Date(d);
-  return dt.getUTCFullYear()+"-"+pad(dt.getUTCMonth()+1)+"-"+pad(dt.getUTCDate())+" "+pad(dt.getUTCHours())+":"+pad(dt.getUTCMinutes());
-}
-function formatDatePST(d) {
-  const dt = new Date(d.getTime() + UTC_OFFSET*3600*1000);
-  return dt.getUTCFullYear()+"-"+pad(dt.getUTCMonth()+1)+"-"+pad(dt.getUTCDate())+" "+pad(dt.getUTCHours())+":"+pad(dt.getUTCMinutes());
-}
-function pad(n){return n<10?"0"+n:n;}
-
-// ---------------- Analyze -----------------
-function analyze() {
-  const purchaseText = document.getElementById("purchaseData").value;
-  const claimText = document.getElementById("claimData").value;
-  const purchases = parsePurchases(purchaseText);
-  const claims = parseClaims(claimText);
-  const container = document.getElementById("result");
-  container.innerHTML = "";
-
-  // compute intervals with extension
-  const intervals = {};
-  for (const p of purchases) {
-    if (!intervals[p.pack]) intervals[p.pack] = [];
-    let lastInterval = intervals[p.pack][intervals[p.pack].length-1];
-    let start = p.ts;
-    if (lastInterval && start <= lastInterval.end) start = lastInterval.end;
-    const end = new Date(start.getTime() + PACKS[p.amount].duration*24*3600*1000);
-    intervals[p.pack].push({start, end, original: p.ts});
-  }
-
-  for (const pack in intervals) {
-    for (const interval of intervals[pack]) {
-      const now = new Date();
-
-      // Compute number of days up to now
-      const totalDays = Math.ceil((Math.min(interval.end, now) - interval.start)/(24*3600*1000));
-      const totalDaysToShow = totalDays>0?totalDays:0;
-
-      const rows = [];
-      for (let i=0;i<totalDaysToShow;i++){
-        const dayStart = new Date(interval.start.getTime() + i*24*3600*1000);
-        const dayEnd = new Date(interval.start.getTime() + (i+1)*24*3600*1000);
-        let claim = claims.find(c=>c.pack===pack && c.ts>=dayStart && c.ts<dayEnd);
-        let status = claim?"Claimed":"Missed";
-        rows.push({day:`Day ${i+1}`, backend: claim?formatDateUTC0(claim.ts):status, pst: claim?formatDatePST(claim.ts):status, className: status.toLowerCase()});
+    for (let amt in PACKS) {
+      if (PACKS[amt].sc === sc && PACKS[amt].gc === gc) {
+        packName = PACKS[amt].name;
+        break;
       }
-
-      // Add future days
-      const futureDays = Math.ceil((interval.end - Math.max(interval.start, now))/(24*3600*1000));
-      for (let i=0;i<futureDays;i++){
-        const dayNum = totalDaysToShow + i + 1;
-        rows.push({day:`Day ${dayNum}`, backend:"Future", pst:"Future", className:"future"});
-      }
-
-      const table = document.createElement("table");
-
-      // Pack Header
-      const header = table.insertRow();
-      header.innerHTML = `<th colspan="2">${pack}</th>`;
-
-      // Range row
-      const rangeRow = table.insertRow();
-      const startStr = formatDateUTC0(interval.start);
-      const endStr = formatDateUTC0(interval.end);
-      const startPST = formatDatePST(interval.start);
-      const endPST = formatDatePST(interval.end);
-      const extendedStr = (interval.original.getTime()!==interval.start.getTime())?" (Extended)":"";
-      rangeRow.innerHTML = `<td>Backend: ${startStr} - ${endStr}${extendedStr}</td>
-                            <td>Server Time: ${startPST} - ${endPST}${extendedStr}</td>`;
-
-      // Days Header
-      const dayHeader = table.insertRow();
-      dayHeader.innerHTML = `<th>Backend (UTC-0)</th><th>PST (UTC-8)</th>`;
-
-      // Add day rows
-      for (const r of rows) {
-        const tr = table.insertRow();
-        tr.className = r.className;
-        tr.innerHTML = `<td>${r.day} - ${r.backend}</td><td>${r.pst}</td>`;
-      }
-
-      container.appendChild(table);
     }
+    if (packName) claims.push({date: dt, pack: packName});
+  }
+  return claims;
+}
+
+function addDays(date, days) {
+  let d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function toPST(date) {
+  return new Date(date.getTime() + UTC_OFFSET*3600*1000);
+}
+
+function formatDate(date) {
+  let y = date.getFullYear();
+  let m = String(date.getMonth()+1).padStart(2,"0");
+  let d = String(date.getDate()).padStart(2,"0");
+  let h = String(date.getHours()).padStart(2,"0");
+  let min = String(date.getMinutes()).padStart(2,"0");
+  return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+function computeIntervals(purchases) {
+  let intervals = [];
+  let packs = {};
+  for (let p of purchases) {
+    if (!packs[p.name]) packs[p.name] = [];
+    packs[p.name].push(p);
+  }
+  for (let name in packs) {
+    let ps = packs[name].sort((a,b)=>a.purchaseDate-b.purchaseDate);
+    let currentEnd = null;
+    for (let p of ps) {
+      let start = p.purchaseDate;
+      if (currentEnd && start <= currentEnd) start = currentEnd;
+      let end = addDays(start, SUB_DURATION_DAYS);
+      intervals.push({name: name, start: start, end: end, originalStart: p.purchaseDate});
+      currentEnd = end;
+    }
+  }
+  return intervals.sort((a,b)=>a.start-b.start);
+}
+
+function analyze() {
+  let purchaseText = document.getElementById("purchaseData").value;
+  let claimText = document.getElementById("claimData").value;
+  let purchases = parsePurchases(purchaseText);
+  let claims = parseClaims(claimText);
+  let intervals = computeIntervals(purchases);
+
+  let output = document.getElementById("output");
+  output.innerHTML = "";
+
+  let today = new Date();
+
+  for (let interval of intervals) {
+    let table = document.createElement("table");
+
+    // Header row
+    let hRow = table.insertRow();
+    let hCell = hRow.insertCell();
+    hCell.colSpan = 2;
+    hCell.innerHTML = `<b>${interval.name}</b>`;
+
+    // Backend / Server row
+    let bRow = table.insertRow();
+    bRow.insertCell().innerHTML = `Backend: ${formatDate(interval.start)} - ${formatDate(interval.end)}`;
+    bRow.insertCell().innerHTML = `Server Time: ${formatDate(toPST(interval.start))} - ${formatDate(toPST(interval.end))}`;
+
+    // Day header
+    let dRow = table.insertRow();
+    dRow.insertCell().innerHTML = "<b>Backend (UTC-0)</b>";
+    dRow.insertCell().innerHTML = "<b>PST (UTC-8)</b>";
+
+    // Day rows
+    let totalDays = Math.ceil((interval.end-interval.start)/(1000*60*60*24));
+    for (let i = 0; i < totalDays; i++) {
+      let dayStart = addDays(interval.start, i);
+      if (dayStart > today) break; // hide future days
+      let dayEnd = addDays(dayStart,1);
+      let claim = claims.find(c => c.pack===interval.name && c.date>=dayStart && c.date<dayEnd);
+      let row = table.insertRow();
+      let cell1 = row.insertCell();
+      let cell2 = row.insertCell();
+      if (claim) {
+        cell1.innerHTML = `Day ${i+1} - Claimed`;
+        cell2.innerHTML = formatDate(toPST(claim.date));
+        cell1.className="claimed";
+        cell2.className="claimed";
+      } else {
+        cell1.innerHTML = `Day ${i+1} - Missed`;
+        cell2.innerHTML = "Missed";
+        cell1.className="missed";
+        cell2.className="missed";
+      }
+    }
+    output.appendChild(table);
   }
 }
 </script>
-
 </body>
 </html>
