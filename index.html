@@ -35,9 +35,8 @@ const PACKS = {
   90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
 };
 const SUB_DURATION_DAYS = 7;
-const UTC_OFFSET = -8; // UTC-8
 
-// Format Date as YYYY-MM-DD HH:MM:SS
+// Format Date as YYYY-MM-DD HH:MM
 function formatDate(date){
   if(!date) return "";
   const pad = n => n.toString().padStart(2,"0");
@@ -46,8 +45,12 @@ function formatDate(date){
   const d = pad(date.getUTCDate());
   const h = pad(date.getUTCHours());
   const min = pad(date.getUTCMinutes());
-  const s = pad(date.getUTCSeconds());
-  return `${y}-${m}-${d} ${h}:${min}:${s}`;
+  return `${y}-${m}-${d} ${h}:${min}`;
+}
+
+// UTC-8 conversion (subtract 8 hours)
+function toUTC8(date){
+  return new Date(date.getTime() - 8*3600*1000);
 }
 
 // Parse purchases
@@ -95,7 +98,6 @@ function parseClaims(text){
 
 // Utility
 function addDays(date, days){ return new Date(date.getTime() + days*24*60*60*1000); }
-function toUTC8(date){ return new Date(date.getTime() + UTC_OFFSET*3600*1000); }
 
 // Compute subscription intervals
 function computeIntervals(purchases){
@@ -128,7 +130,7 @@ function computeDayWindows(start){
       dayStartUTC8=new Date(startUTC8); dayStartUTC8.setHours(0,0,0,0); dayStartUTC8.setDate(dayStartUTC8.getDate()+i);
       dayEndUTC8=addDays(dayStartUTC8,1);
     }
-    windows.push({day_label:`Day${i+1}`, day_start:new Date(dayStartUTC8.getTime()-UTC_OFFSET*3600*1000), day_end:new Date(dayEndUTC8.getTime()-UTC_OFFSET*3600*1000)});
+    windows.push({day_label:`Day${i+1}`, day_start:new Date(start.getTime()), day_end:new Date(start.getTime() + 24*3600*1000)});
   }
   return windows;
 }
@@ -137,11 +139,13 @@ function computeDayWindows(start){
 function mapClaims(interval, claims){
   const windows=computeDayWindows(interval.start);
   const results=[];
-  for(let w of windows){
+  for(let i=0;i<windows.length;i++){
+    let w=windows[i];
     let claim=claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.day_start && c.claim_ts<w.day_end);
     results.push({
       day_label:w.day_label,
       status: claim?"Claimed":"Missed",
+      claim_utc0: claim?claim.claim_ts:null,
       claim_utc8: claim?toUTC8(claim.claim_ts):null
     });
   }
@@ -176,8 +180,8 @@ function createTable(interval, dayResults){
   // Rows 4-10: Day1-Day7
   dayResults.forEach(d=>{
     const row=table.insertRow();
-    row.insertCell().innerText=`${d.day_label}: ${d.status}`;
-    row.insertCell().innerText=d.claim_utc8?`${formatDate(d.claim_utc8)}`:"";
+    row.insertCell().innerText=`${d.day_label}: ${d.status}` + (d.claim_utc0?` (${formatDate(d.claim_utc0)})`:"");
+    row.insertCell().innerText=d.claim_utc8?formatDate(d.claim_utc8):"";
   });
 
   return table;
