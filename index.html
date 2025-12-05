@@ -105,16 +105,24 @@ function analyze() {
   for (const pack in intervals) {
     for (const interval of intervals[pack]) {
       const now = new Date();
-      const totalDays = Math.ceil((interval.end - interval.start)/(24*3600*1000));
+      // Compute number of days in interval up to now (hide future)
+      const totalDays = Math.ceil((Math.min(interval.end, now) - interval.start)/(24*3600*1000));
+      const totalDaysToShow = totalDays>0?totalDays:0;
 
       const rows = [];
-      for (let i=0;i<totalDays;i++){
+      for (let i=0;i<totalDaysToShow;i++){
         const dayStart = new Date(interval.start.getTime() + i*24*3600*1000);
         const dayEnd = new Date(interval.start.getTime() + (i+1)*24*3600*1000);
         let claim = claims.find(c=>c.pack===pack && c.ts>=dayStart && c.ts<dayEnd);
         let status = claim?"Claimed":"Missed";
-        if(dayStart>now) status="Future";
         rows.push({day:`Day ${i+1}`, backend: claim?formatDateUTC0(claim.ts):status, pst: claim?formatDatePST(claim.ts):status, className: status.toLowerCase()});
+      }
+
+      // Add future days
+      const futureDays = Math.ceil((interval.end - Math.max(interval.start, now))/(24*3600*1000));
+      for (let i=0;i<futureDays;i++){
+        const dayNum = totalDaysToShow + i + 1;
+        rows.push({day:`Day ${dayNum}`, backend:"Future", pst:"Future", className:"future"});
       }
 
       const table = document.createElement("table");
