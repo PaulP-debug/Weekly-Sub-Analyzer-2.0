@@ -36,6 +36,13 @@ const PACKS = {
 const SUB_DURATION_DAYS = 7;
 const UTC_OFFSET = -8; // UTC-8
 
+// Utility to format date as YYYY-MM-DD HH:MM:SS
+function formatDate(date){
+  if(!date) return "";
+  const pad=(n)=>n.toString().padStart(2,"0");
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth()+1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+}
+
 // Parse purchases
 function parsePurchases(text){
   const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
@@ -143,14 +150,14 @@ function createTable(interval, dayResults){
 
   // Row 2: purchase dates
   const pRow=table.insertRow();
-  pRow.insertCell().innerText=`Backed: ${interval.purchase_ts.toISOString()}`;
-  pRow.insertCell().innerText=`Server Time: ${toUTC8(interval.purchase_ts).toISOString()}`;
+  pRow.insertCell().innerText=`Backed: ${formatDate(interval.purchase_ts)}`;
+  pRow.insertCell().innerText=`Server Time: ${formatDate(toUTC8(interval.purchase_ts))}`;
 
   // Row 3-9: Day1-Day7
   dayResults.forEach(d=>{
     const row=table.insertRow();
     row.insertCell().innerText=`${d.day_label}: ${d.status}`;
-    row.insertCell().innerText=d.claim_utc8?`PST: ${d.claim_utc8.toISOString()}`:"";
+    row.insertCell().innerText=d.claim_utc8?`PST: ${formatDate(d.claim_utc8)}`:"";
   });
 
   return table;
