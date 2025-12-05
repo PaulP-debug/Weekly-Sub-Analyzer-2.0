@@ -20,7 +20,7 @@
 <label>Paste Purchase Data (7-column table, tab-separated):</label>
 <textarea id="purchaseData"></textarea>
 
-<label>Paste Claim Data (9-column table, tab-separated):</label>
+<label>Paste Claim Data (9-column table, multi-line):</label>
 <textarea id="claimData"></textarea>
 
 <button onclick="analyze()">Analyze</button>
@@ -28,7 +28,6 @@
 <div id="results"></div>
 
 <script>
-// Configuration
 const PACKS = {
   7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000},
   30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000},
@@ -56,26 +55,32 @@ function parsePurchases(text){
   return purchases;
 }
 
-// Parse claims
+// Fixed claim parser for multi-line data
 function parseClaims(text){
   const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
   const claims=[];
-  for(let ln of lines){
-    const cols = ln.split("\t");
-    if(cols.length<9) continue;
-    const sc=parseFloat(cols[0]);
-    const gc=parseInt(cols[1]);
-    const ts=new Date(cols[cols.length-1]);
-    let pack_name=null;
-    for(let amt in PACKS){
-      if(PACKS[amt].sc===sc && PACKS[amt].gc===gc) { pack_name=PACKS[amt].name; break; }
+  for(let i=0;i<lines.length;i++){
+    const line = lines[i];
+    const dateMatch = line.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    if(dateMatch){
+      if(i<2) continue; // need previous lines for SC/GC
+      const scgcLine = lines[i-2].split("\t");
+      if(scgcLine.length<2) continue;
+      const sc=parseFloat(scgcLine[0]);
+      const gc=parseInt(scgcLine[1]);
+      const ts=new Date(dateMatch[0]);
+      // detect pack by SC/GC
+      let pack_name=null;
+      for(let amt in PACKS){
+        if(PACKS[amt].sc===sc && PACKS[amt].gc===gc){ pack_name=PACKS[amt].name; break; }
+      }
+      if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
     }
-    if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
   }
   return claims;
 }
 
-// Utility functions
+// Utility
 function addDays(date, days){ return new Date(date.getTime() + days*24*60*60*1000); }
 function toUTC8(date){ return new Date(date.getTime() + UTC_OFFSET*3600*1000); }
 
@@ -124,7 +129,6 @@ function mapClaims(interval, claims){
     results.push({
       day_label:w.day_label,
       status: claim?"Claimed":"Missed",
-      claim_utc0: claim?claim.claim_ts:null,
       claim_utc8: claim?toUTC8(claim.claim_ts):null
     });
   }
@@ -134,22 +138,21 @@ function mapClaims(interval, claims){
 // Create HTML table
 function createTable(interval, dayResults){
   const table=document.createElement("table");
-  const header=table.insertRow(); 
-  const th=document.createElement("th"); th.colSpan=4; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
+  const header=table.insertRow();
+  const th=document.createElement("th"); th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
+  // Row 2: purchase dates
   const pRow=table.insertRow();
-  pRow.insertCell().innerText="Purchase UTC-0";
-  pRow.insertCell().innerText="";
-  pRow.insertCell().innerText=interval.purchase_ts.toISOString();
-  pRow.insertCell().innerText=toUTC8(interval.purchase_ts).toISOString();
+  pRow.insertCell().innerText=`Backed: ${interval.purchase_ts.toISOString()}`;
+  pRow.insertCell().innerText=`Server Time: ${toUTC8(interval.purchase_ts).toISOString()}`;
 
-  for(let d of dayResults){
+  // Row 3-9: Day1-Day7
+  dayResults.forEach(d=>{
     const row=table.insertRow();
-    row.insertCell().innerText=d.day_label;
-    row.insertCell().innerText=d.status;
-    row.insertCell().innerText=d.claim_utc0? d.claim_utc0.toISOString():"";
-    row.insertCell().innerText=d.claim_utc8? d.claim_utc8.toISOString():"";
-  }
+    row.insertCell().innerText=`${d.day_label}: ${d.status}`;
+    row.insertCell().innerText=d.claim_utc8?`PST: ${d.claim_utc8.toISOString()}`:"";
+  });
+
   return table;
 }
 
