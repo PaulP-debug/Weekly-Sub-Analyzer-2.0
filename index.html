@@ -36,11 +36,17 @@ const PACKS = {
 const SUB_DURATION_DAYS = 7;
 const UTC_OFFSET = -8; // UTC-8
 
-// Utility to format date as YYYY-MM-DD HH:MM:SS
+// Format Date as YYYY-MM-DD HH:MM:SS
 function formatDate(date){
   if(!date) return "";
-  const pad=(n)=>n.toString().padStart(2,"0");
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth()+1)}-${pad(date.getUTCDate())} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`;
+  const pad = n => n.toString().padStart(2,"0");
+  const y = date.getUTCFullYear();
+  const m = pad(date.getUTCMonth()+1);
+  const d = pad(date.getUTCDate());
+  const h = pad(date.getUTCHours());
+  const min = pad(date.getUTCMinutes());
+  const s = pad(date.getUTCSeconds());
+  return `${y}-${m}-${d} ${h}:${min}:${s}`;
 }
 
 // Parse purchases
@@ -62,7 +68,7 @@ function parsePurchases(text){
   return purchases;
 }
 
-// Fixed claim parser for multi-line data
+// Parse claims (multi-line)
 function parseClaims(text){
   const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
   const claims=[];
@@ -70,13 +76,12 @@ function parseClaims(text){
     const line = lines[i];
     const dateMatch = line.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
     if(dateMatch){
-      if(i<2) continue; // need previous lines for SC/GC
+      if(i<2) continue; 
       const scgcLine = lines[i-2].split("\t");
       if(scgcLine.length<2) continue;
       const sc=parseFloat(scgcLine[0]);
       const gc=parseInt(scgcLine[1]);
       const ts=new Date(dateMatch[0]);
-      // detect pack by SC/GC
       let pack_name=null;
       for(let amt in PACKS){
         if(PACKS[amt].sc===sc && PACKS[amt].gc===gc){ pack_name=PACKS[amt].name; break; }
@@ -150,10 +155,10 @@ function createTable(interval, dayResults){
 
   // Row 2: purchase dates
   const pRow=table.insertRow();
-  pRow.insertCell().innerText=`Backed: ${formatDate(interval.purchase_ts)}`;
+  pRow.insertCell().innerText=`Backend: ${formatDate(interval.purchase_ts)}`;
   pRow.insertCell().innerText=`Server Time: ${formatDate(toUTC8(interval.purchase_ts))}`;
 
-  // Row 3-9: Day1-Day7
+  // Rows 3-9: Day1-Day7
   dayResults.forEach(d=>{
     const row=table.insertRow();
     row.insertCell().innerText=`${d.day_label}: ${d.status}`;
