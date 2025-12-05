@@ -1,174 +1,98 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Weekly Subscription Analyzer</title>
-<style>
-  body { font-family: Arial, sans-serif; margin: 20px; }
-  textarea { width: 100%; height: 150px; margin-bottom: 10px; font-family: monospace; }
-  table { border-collapse: collapse; width: 100%; margin-top: 20px; }
-  th, td { border: 1px solid #ccc; padding: 5px; text-align: left; }
-  th { background-color: #eee; }
-  .claimed { background-color: #b6fcb6; }
-  .missed { background-color: #fcb6b6; }
-</style>
-</head>
-<body>
+function processSubPacks() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getActiveSheet();
 
-<h2>Weekly Subscription Analyzer</h2>
+  const dataRange = sheet.getRange(4, 1, sheet.getLastRow() - 3, 7);
+  const rows = dataRange.getValues();
 
-<label>Paste Purchase Data (7-column table, tab-separated):</label>
-<textarea id="purchaseData"></textarea>
+  const output = [];
 
-<label>Paste Claim Data (9-column table, tab-separated):</label>
-<textarea id="claimData"></textarea>
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
 
-<button onclick="analyze()">Analyze</button>
+    const purchaseTime = parseDate(r[0]);
+    const purchaseAmount = Number(r[6]);
 
-<div id="output"></div>
+    if (!purchaseTime || isNaN(purchaseAmount)) {
+      output.push(["", "", "", "", "", "", ""]);
+      continue;
+    }
 
-<script>
-const PACKS = {
-  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000},
-  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000},
-  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
-};
-const SUB_DURATION_DAYS = 7;
-const UTC_OFFSET = -8; // PST server
+    const dayRanges = buildDayRanges(purchaseTime);
 
-function parsePurchases(text) {
-  let lines = text.trim().split("\n");
-  let purchases = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].toLowerCase().includes("sub_pack")) {
-      let prev = lines[i-1].split("\t");
-      let dt = new Date(prev[0]);
-      let amount = parseFloat(lines[i+1]);
-      if (PACKS[amount]) {
-        purchases.push({purchaseDate: dt, amount: amount, name: PACKS[amount].name});
+    const claimTime = parseDate(r[1]);
+    let dayHit = "";
+
+    if (claimTime) {
+      for (let d = 0; d < 7; d++) {
+        if (claimTime >= dayRanges[d].start && claimTime < dayRanges[d].end) {
+          dayHit = d + 1;
+          break;
+        }
       }
     }
+
+    output.push([
+      formatDate(purchaseTime),
+      formatDate(claimTime),
+      dayHit,
+      formatDate(dayRanges[0].start),
+      formatDate(dayRanges[0].end),
+      "7-day sub pack",
+      purchaseAmount
+    ]);
   }
-  return purchases;
+
+  sheet.getRange(4, 9, output.length, 7).setValues(output);
 }
 
-function parseClaims(text) {
-  let lines = text.trim().split("\n");
-  let claims = [];
-  for (let i = 0; i < lines.length; i++) {
-    let cols = lines[i].split("\t");
-    if (cols.length < 9) continue;
-    let sc = parseFloat(cols[0]);
-    let gc = parseInt(parseFloat(cols[1]));
-    let dt = new Date(cols[8]);
-    let packName = null;
-    for (let amt in PACKS) {
-      if (PACKS[amt].sc === sc && PACKS[amt].gc === gc) {
-        packName = PACKS[amt].name;
-        break;
-      }
+function buildDayRanges(purchaseTime) {
+  const resetHour = 8;
+
+  const p = new Date(purchaseTime);
+  const sameDayReset = new Date(p.getFullYear(), p.getMonth(), p.getDate(), resetHour, 0, 0);
+
+  let day1End;
+
+  if (purchaseTime < sameDayReset) {
+    day1End = sameDayReset;
+  } else {
+    day1End = new Date(sameDayReset.getTime() + 24 * 60 * 60 * 1000);
+  }
+
+  const days = [];
+  let start = new Date(purchaseTime);
+  let end = day1End;
+
+  for (let d = 0; d < 7; d++) {
+    if (d > 0) {
+      start = end;
+      end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
     }
-    if (packName) claims.push({date: dt, pack: packName});
+    days.push({ start, end });
   }
-  return claims;
+
+  return days;
 }
 
-function addDays(date, days) {
-  let d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
+function parseDate(v) {
+  if (!v) return null;
+  if (v instanceof Date) return v;
+
+  const t = new Date(v);
+  return isNaN(t.getTime()) ? null : t;
 }
 
-function toPST(date) {
-  return new Date(date.getTime() + UTC_OFFSET*3600*1000);
+function formatDate(d) {
+  if (!d) return "";
+  const pad = (n) => (n < 10 ? "0" + n : n);
+
+  return (
+    d.getFullYear() + "-" +
+    pad(d.getMonth() + 1) + "-" +
+    pad(d.getDate()) + " " +
+    pad(d.getHours()) + ":" +
+    pad(d.getMinutes()) + ":" +
+    pad(d.getSeconds())
+  );
 }
-
-function formatDate(date) {
-  let y = date.getFullYear();
-  let m = String(date.getMonth()+1).padStart(2,"0");
-  let d = String(date.getDate()).padStart(2,"0");
-  let h = String(date.getHours()).padStart(2,"0");
-  let min = String(date.getMinutes()).padStart(2,"0");
-  return `${y}-${m}-${d} ${h}:${min}`;
-}
-
-function computeIntervals(purchases) {
-  let intervals = [];
-  let packs = {};
-  for (let p of purchases) {
-    if (!packs[p.name]) packs[p.name] = [];
-    packs[p.name].push(p);
-  }
-  for (let name in packs) {
-    let ps = packs[name].sort((a,b)=>a.purchaseDate-b.purchaseDate);
-    let currentEnd = null;
-    for (let p of ps) {
-      let start = p.purchaseDate;
-      if (currentEnd && start <= currentEnd) start = currentEnd;
-      let end = addDays(start, SUB_DURATION_DAYS);
-      intervals.push({name: name, start: start, end: end, originalStart: p.purchaseDate});
-      currentEnd = end;
-    }
-  }
-  return intervals.sort((a,b)=>a.start-b.start);
-}
-
-function analyze() {
-  let purchaseText = document.getElementById("purchaseData").value;
-  let claimText = document.getElementById("claimData").value;
-  let purchases = parsePurchases(purchaseText);
-  let claims = parseClaims(claimText);
-  let intervals = computeIntervals(purchases);
-
-  let output = document.getElementById("output");
-  output.innerHTML = "";
-
-  let today = new Date();
-
-  for (let interval of intervals) {
-    let table = document.createElement("table");
-
-    // Header row
-    let hRow = table.insertRow();
-    let hCell = hRow.insertCell();
-    hCell.colSpan = 2;
-    hCell.innerHTML = `<b>${interval.name}</b>`;
-
-    // Backend / Server row
-    let bRow = table.insertRow();
-    bRow.insertCell().innerHTML = `Backend: ${formatDate(interval.start)} - ${formatDate(interval.end)}`;
-    bRow.insertCell().innerHTML = `Server Time: ${formatDate(toPST(interval.start))} - ${formatDate(toPST(interval.end))}`;
-
-    // Day header
-    let dRow = table.insertRow();
-    dRow.insertCell().innerHTML = "<b>Backend (UTC-0)</b>";
-    dRow.insertCell().innerHTML = "<b>PST (UTC-8)</b>";
-
-    // Day rows
-    let totalDays = Math.ceil((interval.end-interval.start)/(1000*60*60*24));
-    for (let i = 0; i < totalDays; i++) {
-      let dayStart = addDays(interval.start, i);
-      if (dayStart > today) break; // hide future days
-      let dayEnd = addDays(dayStart,1);
-      let claim = claims.find(c => c.pack===interval.name && c.date>=dayStart && c.date<dayEnd);
-      let row = table.insertRow();
-      let cell1 = row.insertCell();
-      let cell2 = row.insertCell();
-      if (claim) {
-        cell1.innerHTML = `Day ${i+1} - Claimed`;
-        cell2.innerHTML = formatDate(toPST(claim.date));
-        cell1.className="claimed";
-        cell2.className="claimed";
-      } else {
-        cell1.innerHTML = `Day ${i+1} - Missed`;
-        cell2.innerHTML = "Missed";
-        cell1.className="missed";
-        cell2.className="missed";
-      }
-    }
-    output.appendChild(table);
-  }
-}
-</script>
-</body>
-</html>
