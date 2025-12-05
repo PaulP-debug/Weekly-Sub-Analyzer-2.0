@@ -11,6 +11,7 @@
   th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
   th { background-color: #f2f2f2; }
   .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
+  .subheader { background-color: #fcf8e3; font-weight: bold; text-align: center; }
 </style>
 </head>
 <body>
@@ -150,19 +151,33 @@ function mapClaims(interval, claims){
 // Create HTML table
 function createTable(interval, dayResults){
   const table=document.createElement("table");
+  
+  // Row 1: Main header
   const header=table.insertRow();
-  const th=document.createElement("th"); th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
+  const th=document.createElement("th"); 
+  th.colSpan=2; 
+  th.className="header"; 
+  th.innerText=interval.pack_name; 
+  header.appendChild(th);
 
-  // Row 2: purchase dates
+  // Row 2: Purchase info
   const pRow=table.insertRow();
   pRow.insertCell().innerText=`Backend: ${formatDate(interval.purchase_ts)}`;
   pRow.insertCell().innerText=`Server Time: ${formatDate(toUTC8(interval.purchase_ts))}`;
 
-  // Rows 3-9: Day1-Day7
+  // Row 3: Days header
+  const subHeader=table.insertRow();
+  const cell1=subHeader.insertCell();
+  cell1.innerText="Backend (UTC-0)";
+  const cell2=subHeader.insertCell();
+  cell2.innerText="PST (UTC-8)";
+  subHeader.className="subheader";
+
+  // Rows 4-10: Day1-Day7
   dayResults.forEach(d=>{
     const row=table.insertRow();
     row.insertCell().innerText=`${d.day_label}: ${d.status}`;
-    row.insertCell().innerText=d.claim_utc8?`PST: ${formatDate(d.claim_utc8)}`:"";
+    row.insertCell().innerText=d.claim_utc8?`${formatDate(d.claim_utc8)}`:"";
   });
 
   return table;
