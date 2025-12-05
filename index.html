@@ -5,251 +5,172 @@
 <title>Subscription Analyzer</title>
 <style>
   body { font-family: Arial, sans-serif; padding: 20px; }
-  textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
-  button { padding: 10px 20px; font-size: 16px; margin-bottom: 10px; }
-  table { border-collapse: collapse; margin-bottom: 20px; width: 100%; table-layout: fixed; }
-  th, td { border: 1px solid #999; padding: 8px 10px; text-align: left; }
+  textarea { width: 100%; height: 150px; margin-bottom: 10px; font-family: monospace; }
+  table { border-collapse: collapse; margin-bottom: 30px; width: 100%; }
+  th, td { border: 1px solid #ccc; padding: 8px; text-align: left; }
   th { background-color: #f2f2f2; }
-  .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
-  .subheader { background-color: #fcf8e3; font-weight: bold; text-align: center; }
-  .claimed { background-color: #e6f4ea; color: #155724; }
-  .missed { background-color: #f9e6e6; color: #721c24; }
-  .future { background-color: #f0f0f0; color: #6c757d; }
+  .header { font-weight: bold; background-color: #e0e0e0; }
+  .claimed { background-color: #d4edda; }
+  .missed { background-color: #f8d7da; }
+  .future { background-color: #fff3cd; display: none; }
+  button.toggle { margin-bottom: 10px; }
 </style>
 </head>
 <body>
 
 <h2>Subscription Analyzer</h2>
 
-<label>Paste Purchase Data (7-column table, tab-separated):</label>
-<textarea id="purchaseData"></textarea>
+<h3>Paste Purchase Data (7 columns, tab-delimited)</h3>
+<textarea id="purchaseData" placeholder="Paste purchase data here..."></textarea>
 
-<label>Paste Claim Data (9-column table, multi-line):</label>
-<textarea id="claimData"></textarea>
+<h3>Paste Claim Data (9 columns, tab-delimited)</h3>
+<textarea id="claimData" placeholder="Paste claim data here..."></textarea>
 
 <button onclick="analyze()">Analyze</button>
-<div id="updateCounter" style="margin-bottom:20px; font-weight:bold;">Update ZA</div>
 
-<div id="results"></div>
+<div id="result"></div>
 
 <script>
 const PACKS = {
-  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000},
-  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000},
-  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
+  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000, duration: 7},
+  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000, duration: 7},
+  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000, duration: 7},
 };
-const SUB_DURATION_DAYS = 7;
-let updateIndex = 701; // ZA
 
-// Format date YYYY-MM-DD HH:MM
-function formatDateUTC(date){
-  if(!date) return "";
-  const pad=n=>n.toString().padStart(2,"0");
-  const y=date.getUTCFullYear();
-  const m=pad(date.getUTCMonth()+1);
-  const d=pad(date.getUTCDate());
-  const h=pad(date.getUTCHours());
-  const min=pad(date.getUTCMinutes());
-  return `${y}-${m}-${d} ${h}:${min}`;
-}
+const UTC_OFFSET = -8; // server time (PST)
 
-// UTC-8 conversion
-function toUTC8(date){ return new Date(date.getTime()-8*3600*1000); }
-
-// Letter-based update label
-function getUpdateLabel(index){
-  const letters="ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  const base=letters.length;
-  let label="", i=index;
-  do{
-    label=letters[i%base]+label;
-    i=Math.floor(i/base)-1;
-  }while(i>=0);
-  return "Update "+label;
-}
-
-// Parse purchases
-function parsePurchases(text){
-  const lines=text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
-  const purchases=[];
-  for(let i=0;i<lines.length;i++){
-    if(lines[i].toLowerCase().includes("sub_pack")){
-      const prev=i>0?lines[i-1]:null;
-      if(!prev) continue;
-      const ts=new Date(prev.split("\t")[0]+"Z");
-      const nextLine=(i+1)<lines.length?lines[i+1]:lines[i];
-      const amtMatch=nextLine.match(/\d+(\.\d+)?/);
-      if(!amtMatch) continue;
-      const amt=parseFloat(amtMatch[0]);
-      if(PACKS[amt]) purchases.push({purchase_ts:ts, pack_amount:amt, pack_name:PACKS[amt].name});
+// ---------------- Parsing -----------------
+function parsePurchases(text) {
+  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l);
+  const purchases = [];
+  for (let i=0; i<lines.length; i++) {
+    if (lines[i].toLowerCase() === "sub_pack") {
+      const prevLine = lines[i-1] || "";
+      const tsStr = prevLine.split("\t")[0];
+      const amtLine = lines[i+1] || lines[i];
+      const amount = parseFloat(amtLine.match(/\d+(\.\d+)?/)[0]);
+      if (PACKS[amount]) purchases.push({ts: new Date(tsStr), amount: amount, pack: PACKS[amount].name});
     }
   }
-  return purchases;
+  return purchases.sort((a,b)=>a.ts-b.ts);
 }
 
-// Parse claims
-function parseClaims(text){
-  const lines=text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
-  const claims=[];
-  for(let i=0;i<lines.length;i++){
-    const line=lines[i];
-    const dateMatch=line.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
-    if(dateMatch){
-      if(i<2) continue;
-      const scgcLine=lines[i-2].split("\t");
-      if(scgcLine.length<2) continue;
-      const sc=parseFloat(scgcLine[0]);
-      const gc=parseInt(scgcLine[1]);
-      const ts=new Date(dateMatch[0]+"Z");
-      let pack_name=null;
-      for(let amt in PACKS){
-        if(PACKS[amt].sc===sc && PACKS[amt].gc===gc){ pack_name=PACKS[amt].name; break; }
+function parseClaims(text) {
+  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l);
+  const claims = [];
+  for (let i=0; i<lines.length; i++) {
+    const cols = lines[i].split("\t");
+    if (cols.length < 9) continue;
+    const sc = parseFloat(cols[0]);
+    const gc = parseInt(parseFloat(cols[1]));
+    const tsStr = cols[cols.length-1];
+    const ts = new Date(tsStr);
+    let packName = null;
+    for (const amt in PACKS) if (PACKS[amt].sc === sc && PACKS[amt].gc === gc) packName = PACKS[amt].name;
+    if (packName) claims.push({ts, pack: packName});
+  }
+  return claims.sort((a,b)=>a.ts-b.ts);
+}
+
+// ---------------- Day Windows -----------------
+function computeDayWindows(start, totalDays) {
+  const days = [];
+  for (let i=0; i<totalDays; i++) {
+    const dayStart = new Date(start.getTime() + i*24*3600*1000);
+    const dayEnd = new Date(start.getTime() + (i+1)*24*3600*1000);
+    days.push({dayStart, dayEnd});
+  }
+  return days;
+}
+
+// ---------------- Format -----------------
+function formatDateUTC0(d) {
+  const dt = new Date(d);
+  return dt.getUTCFullYear()+"-"+pad(dt.getUTCMonth()+1)+"-"+pad(dt.getUTCDate())+" "+pad(dt.getUTCHours())+":"+pad(dt.getUTCMinutes());
+}
+function formatDatePST(d) {
+  const dt = new Date(d.getTime() + UTC_OFFSET*3600*1000);
+  return dt.getUTCFullYear()+"-"+pad(dt.getUTCMonth()+1)+"-"+pad(dt.getUTCDate())+" "+pad(dt.getUTCHours())+":"+pad(dt.getUTCMinutes());
+}
+function pad(n){return n<10?"0"+n:n;}
+
+// ---------------- Analyze -----------------
+function analyze() {
+  const purchaseText = document.getElementById("purchaseData").value;
+  const claimText = document.getElementById("claimData").value;
+  const purchases = parsePurchases(purchaseText);
+  const claims = parseClaims(claimText);
+  const container = document.getElementById("result");
+  container.innerHTML = "";
+
+  // compute intervals with extension
+  const intervals = {};
+  for (const p of purchases) {
+    if (!intervals[p.pack]) intervals[p.pack] = [];
+    let lastInterval = intervals[p.pack][intervals[p.pack].length-1];
+    let start = p.ts;
+    if (lastInterval && start <= lastInterval.end) start = lastInterval.end;
+    const end = new Date(start.getTime() + PACKS[p.amount].duration*24*3600*1000);
+    intervals[p.pack].push({start, end, original: p.ts});
+  }
+
+  for (const pack in intervals) {
+    for (const interval of intervals[pack]) {
+      const now = new Date();
+      const totalDays = Math.ceil((interval.end - interval.start)/(24*3600*1000));
+      const dayWindows = computeDayWindows(interval.start, totalDays);
+
+      const rows = dayWindows.map((day,i)=>{
+        const claim = claims.find(c=>c.pack===pack && c.ts>=day.dayStart && c.ts<day.dayEnd);
+        let status = claim?"Claimed":"Missed";
+        if(day.dayStart>now) status="Future";
+        return {day:`Day ${i+1}`, backend: claim?formatDateUTC0(claim.ts):status, pst: claim?formatDatePST(claim.ts):status, className: status.toLowerCase()};
+      });
+
+      const table = document.createElement("table");
+
+      // Pack Header
+      const header = table.insertRow();
+      header.innerHTML = `<th colspan="2">${pack}</th>`;
+
+      // Range row
+      const rangeRow = table.insertRow();
+      const startStr = formatDateUTC0(interval.start);
+      const endStr = formatDateUTC0(interval.end);
+      const startPST = formatDatePST(interval.start);
+      const endPST = formatDatePST(interval.end);
+      const extendedStr = (interval.original.getTime()!==interval.start.getTime())?" (Extended)":"";
+      rangeRow.innerHTML = `<td>Backend: ${startStr} - ${endStr}${extendedStr}</td>
+                            <td>Server Time: ${startPST} - ${endPST}${extendedStr}</td>`;
+
+      // Toggle button for future days
+      const toggleBtn = document.createElement("button");
+      toggleBtn.textContent = "Show/Hide Future Days";
+      toggleBtn.className = "toggle";
+      toggleBtn.onclick = ()=> {
+        table.querySelectorAll(".future").forEach(r=>{
+          r.style.display = r.style.display==="none"?"":"none";
+        });
+      };
+      container.appendChild(toggleBtn);
+
+      // Days Header
+      const dayHeader = table.insertRow();
+      dayHeader.innerHTML = `<th>Backend (UTC-0)</th><th>PST (UTC-8)</th>`;
+
+      // Add day rows
+      for (const r of rows) {
+        const tr = table.insertRow();
+        tr.className = r.className;
+        if(r.className==="future") tr.style.display="none";
+        tr.innerHTML = `<td>${r.day} - ${r.backend}</td><td>${r.pst}</td>`;
       }
-      if(pack_name) claims.push({claim_ts:ts, sc, gc, pack_name});
+
+      container.appendChild(table);
     }
   }
-  return claims;
-}
-
-// Compute intervals with extensions
-function computeIntervals(purchases){
-  const intervals=[];
-  for(let amt in PACKS){
-    const packName=PACKS[amt].name;
-    let packPurchases=purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
-    if(packPurchases.length===0) continue;
-    let start=packPurchases[0].purchase_ts;
-    let end=new Date(start.getTime()+SUB_DURATION_DAYS*24*3600*1000);
-    for(let i=1;i<packPurchases.length;i++){
-      const p=packPurchases[i];
-      if(p.purchase_ts<=end){ // extend
-        end=new Date(end.getTime()+SUB_DURATION_DAYS*24*3600*1000);
-      } else { // new interval
-        intervals.push({pack_name:packName, purchase_start:start, purchase_end:end});
-        start=p.purchase_ts;
-        end=new Date(start.getTime()+SUB_DURATION_DAYS*24*3600*1000);
-      }
-    }
-    intervals.push({pack_name:packName, purchase_start:start, purchase_end:end});
-  }
-  return intervals.sort((a,b)=>a.purchase_start-b.purchase_start);
-}
-
-// Compute Day Windows using 08:00 UTC-8 reset
-function computeDayWindows(start, end){
-  const windows=[];
-  let dayStart=new Date(start);
-  while(dayStart<end){
-    // Compute next reset at 08:00 UTC-8
-    let dayStartUTC8=toUTC8(dayStart);
-    let nextResetUTC8=new Date(dayStartUTC8);
-    nextResetUTC8.setUTCHours(8,0,0,0);
-    if(dayStartUTC8.getUTCHours()>=8) nextResetUTC8.setUTCDate(nextResetUTC8.getUTCDate()+1);
-    let dayEnd=new Date(nextResetUTC8.getTime() + 8*3600*1000); // convert back to Backend UTC
-    if(dayEnd>end) dayEnd=new Date(end);
-    windows.push({day_label:"Day "+(windows.length+1), start:dayStart, end:dayEnd});
-    dayStart=dayEnd;
-  }
-  return windows;
-}
-
-// Map claims to days
-function mapClaims(interval, claims){
-  const windows=computeDayWindows(interval.purchase_start, interval.purchase_end);
-  const results=[];
-  const now=new Date();
-  for(let w of windows){
-    const claim=claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.start && c.claim_ts<w.end);
-    let status="", backend=null, pst=null;
-    if(claim){
-      status="Claimed";
-      backend=claim.claim_ts;
-      pst=toUTC8(claim.claim_ts);
-    } else if(w.start>now){
-      status="Future";
-    } else {
-      status="Missed";
-    }
-    results.push({day_label:w.day_label, status, claim_utc0:backend, claim_utc8:pst});
-  }
-  return results;
-}
-
-// Create table
-function createTable(interval, dayResults, idx){
-  const container=document.createElement("div");
-
-  const table=document.createElement("table");
-
-  // Row 1: header
-  const header=table.insertRow();
-  const th=document.createElement("th");
-  th.colSpan=2;
-  th.className="header";
-  th.innerText=interval.pack_name;
-  header.appendChild(th);
-
-  // Row 2: subscription range
-  const pRow=table.insertRow();
-  const days=Math.ceil((interval.purchase_end-interval.purchase_start)/(24*3600*1000));
-  pRow.insertCell().innerText=`Backend: ${formatDateUTC(interval.purchase_start)} - ${formatDateUTC(interval.purchase_end)} (${days} days, Extended)`;
-  pRow.insertCell().innerText=`Server Time: ${formatDateUTC(toUTC8(interval.purchase_start))} - ${formatDateUTC(toUTC8(interval.purchase_end))} (${days} days, Extended)`;
-
-  // Row 3: days header
-  const subHeader=table.insertRow();
-  const cell1=subHeader.insertCell();
-  cell1.innerText="Backend (UTC-0)";
-  const cell2=subHeader.insertCell();
-  cell2.innerText="PST (UTC-8)";
-  subHeader.className="subheader";
-
-  // Day rows
-  dayResults.forEach(d=>{
-    const row=table.insertRow();
-    let backendText="", pstText="", cls="";
-    if(d.status==="Claimed"){
-      backendText=formatDateUTC(d.claim_utc0);
-      pstText=formatDateUTC(d.claim_utc8);
-      cls="claimed";
-    } else if(d.status==="Missed"){
-      backendText="Missed";
-      pstText="Missed";
-      cls="missed";
-    } else if(d.status==="Future"){
-      backendText="Future";
-      pstText="Future";
-      cls="future";
-    }
-    const c1=row.insertCell();
-    c1.innerText=d.day_label+" - "+backendText;
-    const c2=row.insertCell();
-    c2.innerText=pstText;
-    c1.className=cls;
-    c2.className=cls;
-    if(d.status==="Future"){
-      row.style.display="none"; // hide future by default
-    }
-  });
-
-  container.appendChild(table);
-
-  return container;
-}
-
-// Main analyze
-function analyze(){
-  const purchases=parsePurchases(document.getElementById("purchaseData").value);
-  const claims=parseClaims(document.getElementById("claimData").value);
-  const resultsDiv=document.getElementById("results");
-  resultsDiv.innerHTML="";
-  const intervals=computeIntervals(purchases);
-  intervals.forEach((interval, idx)=>{
-    const dayResults=mapClaims(interval,claims);
-    resultsDiv.appendChild(createTable(interval, dayResults, idx));
-  });
-  document.getElementById("updateCounter").innerText=getUpdateLabel(updateIndex);
-  updateIndex++;
 }
 </script>
+
 </body>
 </html>
