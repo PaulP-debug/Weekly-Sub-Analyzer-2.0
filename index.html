@@ -96,7 +96,6 @@ function computeIntervals(purchases){
     const packName = PACKS[amt].name;
     let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
     let currentInterval = null;
-    let subscriptionCount = 0;
 
     for(let p of packPurchases){
       const start = new Date(p.purchase_ts);
@@ -128,12 +127,11 @@ function computeIntervals(purchases){
 function computeDayWindows(interval){
   const windows = [];
   let start = new Date(interval.start_ts);
-  let dayCount = interval.subscriptions * SUB_DURATION_DAYS;
+  const total_days = interval.subscriptions * SUB_DURATION_DAYS;
 
-  for(let i=0;i<dayCount;i++){
+  for(let i=0;i<total_days;i++){
     let dayEnd = new Date(start);
     if(i===0){
-      // Day1 end rule
       if(start.getHours()<8) dayEnd.setHours(8,0,0,0);
       else { dayEnd.setDate(dayEnd.getDate()+1); dayEnd.setHours(8,0,0,0);}
     } else {
@@ -171,37 +169,37 @@ function createTable(interval, dayResults){
   // Header
   const header = table.insertRow();
   const th = document.createElement("th"); 
-  th.colSpan=1; 
+  th.colSpan=2; 
   th.className="header"; 
   th.innerText=interval.pack_name; 
   header.appendChild(th);
 
-  // Empty row under header
-  const emptyRow = table.insertRow(); emptyRow.insertCell().innerText="";
-
-  // Total days
+  // Total days row (with blank column)
   const totalRow = table.insertRow();
-  const totalCell = totalRow.insertCell(); 
-  totalCell.innerText = `Total: ${interval.subscriptions * SUB_DURATION_DAYS} day${interval.subscriptions * SUB_DURATION_DAYS>1?'s':''}`; 
-  totalCell.style.backgroundColor="#d1ecf1"; totalCell.style.fontWeight="bold";
+  let cell1 = totalRow.insertCell(); 
+  cell1.innerText = `Total: ${interval.subscriptions * SUB_DURATION_DAYS} day${interval.subscriptions * SUB_DURATION_DAYS>1?'s':''}`;
+  cell1.style.backgroundColor="#d1ecf1"; cell1.style.fontWeight="bold";
+  totalRow.insertCell(); // blank column
 
-  // Start/end row
+  // Start/end row (with blank column)
   const seRow = table.insertRow();
   seRow.insertCell().innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(interval.end_ts)}`;
+  seRow.insertCell(); // blank column
 
   // Subheader
   const subHeader = table.insertRow();
-  const cell = subHeader.insertCell(); 
-  cell.innerText="Day | Day Range | Status"; 
+  subHeader.insertCell().innerText = "Day | Day Range | Status";
+  subHeader.insertCell(); // blank column
   subHeader.className="subheader";
 
   // Day rows
   for(let d of dayResults){
     const row = table.insertRow();
     const cell = row.insertCell();
-    cell.innerText = `${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)}  ${d.status}`;
+    cell.innerText = `${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)} | ${d.status}`;
     if(d.status !== "Missed") cell.className="claimed";
     else cell.className="missed";
+    row.insertCell(); // blank column
   }
   return table;
 }
