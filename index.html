@@ -2,68 +2,129 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Subscription Analyzer - Side by Side</title>
+<title>Subscription Analyzer</title>
 <style>
 body { font-family: Arial, sans-serif; padding: 20px; }
+textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
+button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-table { border-collapse: collapse; width: 350px; min-width: 350px; table-layout: fixed; }
+table { border-collapse: collapse; width: 500px; min-width: 500px; table-layout: fixed; }
 th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; word-wrap: break-word; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; }
 .missed { background-color:#f8d7da; color:#721c24; }
-td.blank { background-color:#fff; }
+td.blank { background-color:#fff; width: 20px; }
+td.main { width: 460px; }
 </style>
 </head>
 <body>
 
-<h2>Subscription Analyzer - Side by Side</h2>
+<h2>Subscription Analyzer</h2>
+
+<label>Paste Purchase Data:</label>
+<textarea id="purchaseData"></textarea>
+
+<label>Paste Claim Data:</label>
+<textarea id="claimData"></textarea>
+
+<button onclick="analyze()">Analyze</button>
 
 <div class="flex-container" id="results"></div>
 
 <script>
-// Simulation Data
-const intervals = [
-  {
-    pack_name: "Sub Pack 07",
-    start_ts: new Date("2025-11-28 15:37"),
-    subscriptions: 2,
-    claims: [
-      new Date("2025-11-28 19:16:13"),
-      new Date("2025-11-29 12:05:04"),
-      new Date("2025-12-01 20:58:21")
-    ]
-  },
-  {
-    pack_name: "Sub Pack 30",
-    start_ts: new Date("2025-12-01 15:37"),
-    subscriptions: 1,
-    claims: [
-      new Date("2025-12-01 20:58:21"),
-      new Date("2025-12-02 15:37:31")
-    ]
-  },
-  {
-    pack_name: "Sub Pack 90",
-    start_ts: new Date("2025-12-03 09:20"),
-    subscriptions: 1,
-    claims: [
-      new Date("2025-12-03 12:10:00")
-    ]
-  }
-];
+const PACKS = {
+  7.00: {name: "Sub Pack 07"},
+  30.00: {name: "Sub Pack 30"},
+  90.00: {name: "Sub Pack 90"}
+};
 
 function formatDate(date){
+  if(!date) return "-";
   const pad = n => n.toString().padStart(2,"0");
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Compute day windows for a subscription
+// Parse purchase data
+function parsePurchases(text){
+  const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
+  const purchases=[];
+  for(let i=0;i<lines.length;i++){
+    if(lines[i].toLowerCase().includes("sub_pack")){
+      const prev = i>0 ? lines[i-1] : null;
+      if(!prev) continue;
+      const ts = new Date(prev.split("\t")[0]);
+      const nextLine = (i+1)<lines.length ? lines[i+1] : lines[i];
+      const amtMatch = nextLine.match(/\d+(\.\d+)?/);
+      if(!amtMatch) continue;
+      const amt = parseFloat(amtMatch[0]);
+      if(PACKS[amt]) purchases.push({purchase_ts: ts, pack_amount: amt, pack_name: PACKS[amt].name});
+    }
+  }
+  return purchases;
+}
+
+// Parse claim data
+function parseClaims(text){
+  const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
+  const claims=[];
+  for(let i=0;i<lines.length;i++){
+    const line = lines[i];
+    const dateMatch = line.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    if(dateMatch){
+      const ts = new Date(dateMatch[0]);
+      if(i>=2){
+        const scgc = lines[i-2].split("\t");
+        const sc = parseFloat(scgc[0]);
+        const gc = parseInt(scgc[1]);
+        let pack_name=null;
+        for(let amt in PACKS){
+          if(PACKS[amt]) pack_name=PACKS[amt].name;
+        }
+        claims.push({claim_ts: ts, pack_name: pack_name});
+      }
+    }
+  }
+  return claims;
+}
+
+// Compute intervals with extension
+function computeIntervals(purchases){
+  const intervals=[];
+  for(let amt in PACKS){
+    const packName = PACKS[amt].name;
+    let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
+    let currentStart = null;
+    let currentEnd = null;
+    let subscriptionCount=0;
+    for(let p of packPurchases){
+      if(!currentStart){
+        currentStart = p.purchase_ts;
+        currentEnd = new Date(currentStart.getTime());
+        subscriptionCount++;
+      } else {
+        if(p.purchase_ts <= currentEnd){
+          subscriptionCount++;
+        } else {
+          intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount, claims: []});
+          currentStart = p.purchase_ts;
+          currentEnd = new Date(currentStart.getTime());
+          subscriptionCount =1;
+        }
+      }
+      currentEnd.setDate(currentEnd.getDate()+7);
+    }
+    if(currentStart) intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount, claims: []});
+  }
+  return intervals;
+}
+
+// Compute day windows
 function computeDayWindows(interval){
-  const windows = [];
+  const windows=[];
   let start = new Date(interval.start_ts);
-  const total_days = interval.subscriptions * 7;
+  const total_days = interval.subscriptions*7;
   for(let i=0;i<total_days;i++){
     let dayEnd = new Date(start);
     if(i===0){
@@ -79,55 +140,55 @@ function computeDayWindows(interval){
   return windows;
 }
 
-// Map claims to days
-function mapClaims(interval, totalMaxDays){
+// Map claims
+function mapClaims(interval, claims, totalMaxDays){
   const windows = computeDayWindows(interval);
-  const results = [];
+  const results=[];
   for(let i=0;i<totalMaxDays;i++){
     const w = windows[i] || {day_label:`Day${i+1}`, start:null, end:null};
-    let status = "Missed";
+    let status="Missed";
     if(w.start){
-      for(let c of interval.claims){
-        if(c >= w.start && c < w.end){
-          status = formatDate(c);
+      for(let c of claims){
+        if(c.pack_name===interval.pack_name && c.claim_ts>=w.start && c.claim_ts<w.end){
+          status=formatDate(c.claim_ts);
           break;
         }
       }
     }
-    results.push({day_label:w.day_label, start:w.start, end:w.end, status:status});
+    results.push({day_label:w.day_label, start:w.start, end:w.end, status});
   }
   return results;
 }
 
-// Create table for a subscription
+// Create table
 function createTable(interval, dayResults){
   const table = document.createElement("table");
-
-  // Header
   const header = table.insertRow();
-  const th = document.createElement("th"); 
-  th.colSpan=2; 
-  th.className="header"; 
-  th.innerText=interval.pack_name; 
-  header.appendChild(th);
+  const th = document.createElement("th");
+  th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
-  // Total days row (with blank column)
+  // Total row
   const totalRow = table.insertRow();
-  let cell1 = totalRow.insertCell(); 
-  cell1.innerText = `Total: ${interval.subscriptions * 7} day${interval.subscriptions*7>1?'s':''}`;
+  const cell1 = totalRow.insertCell();
+  cell1.innerText = `Total: ${interval.subscriptions*7} day${interval.subscriptions*7>1?'s':''}`;
   cell1.style.backgroundColor="#d1ecf1"; cell1.style.fontWeight="bold";
-  totalRow.insertCell(); // blank column
+  cell1.className="main";
+  totalRow.insertCell().className="blank";
 
-  // Start/end row
+  // Start/End row
   const seRow = table.insertRow();
-  const endDate = dayResults.find(d=>d.start)?.end || new Date(interval.start_ts.getTime() + interval.subscriptions*7*24*60*60*1000);
-  seRow.insertCell().innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(endDate)}`;
-  seRow.insertCell(); // blank column
+  const endDate = dayResults.find(d=>d.start)?.end || new Date(interval.start_ts.getTime()+interval.subscriptions*7*24*60*60*1000);
+  const seCell = seRow.insertCell();
+  seCell.innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(endDate)}`;
+  seCell.className="main";
+  seRow.insertCell().className="blank";
 
   // Subheader
   const subHeader = table.insertRow();
-  subHeader.insertCell().innerText = "Day | Day Range | Status";
-  subHeader.insertCell(); // blank column
+  const subCell = subHeader.insertCell();
+  subCell.innerText="Day | Day Range | Status";
+  subCell.className="main";
+  subHeader.insertCell().className="blank";
   subHeader.className="subheader";
 
   // Day rows
@@ -135,27 +196,38 @@ function createTable(interval, dayResults){
     const row = table.insertRow();
     const cell = row.insertCell();
     if(d.start && d.end){
-      cell.innerText = `${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)} | ${d.status}`;
-      if(d.status !== "Missed") cell.className="claimed";
-      else cell.className="missed";
+      cell.innerText=`${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)} | ${d.status}`;
+      cell.className = d.status!=="Missed" ? "claimed":"missed";
     } else {
-      cell.innerText = `${d.day_label} | - | ${d.status}`;
+      cell.innerText=`${d.day_label} | - | ${d.status}`;
       cell.className="missed";
     }
-    row.insertCell().className="blank"; // blank column
+    row.insertCell().className="blank";
+    cell.className="main";
   });
 
   return table;
 }
 
-// Determine maximum number of days across all subscriptions
-const totalMaxDays = Math.max(...intervals.map(i=>i.subscriptions*7));
+// Main analyzer
+function analyze(){
+  const purchases = parsePurchases(document.getElementById("purchaseData").value);
+  const claims = parseClaims(document.getElementById("claimData").value);
+  const intervals = computeIntervals(purchases);
 
-const resultsDiv = document.getElementById("results");
-intervals.forEach(interval=>{
-  const dayResults = mapClaims(interval, totalMaxDays);
-  resultsDiv.appendChild(createTable(interval, dayResults));
-});
+  intervals.forEach(interval=>{
+    interval.claims = claims;
+  });
+
+  const totalMaxDays = Math.max(...intervals.map(i=>i.subscriptions*7));
+
+  const resultsDiv = document.getElementById("results");
+  resultsDiv.innerHTML="";
+  intervals.forEach(interval=>{
+    const dayResults = mapClaims(interval, claims, totalMaxDays);
+    resultsDiv.appendChild(createTable(interval, dayResults));
+  });
+}
 </script>
 
 </body>
