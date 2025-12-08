@@ -8,15 +8,15 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-table { border-collapse: collapse; width: 600px; min-width: 600px; table-layout: fixed; }
-th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; word-wrap: break-word; }
+table { border-collapse: collapse; width: 580px; min-width: 580px; table-layout: fixed; }
+th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; word-wrap: break-word; height: 30px; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; }
 .missed { background-color:#f8d7da; color:#721c24; }
 td.blank { background-color:#fff; width: 20px; }
-td.main { width: 580px; } /* Column 1 doubled */
+td.main { width: 560px; } /* Column 1 wider */
 </style>
 </head>
 <body>
@@ -46,6 +46,7 @@ function formatDate(date){
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+// Parse purchases
 function parsePurchases(text){
   const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
   const purchases=[];
@@ -64,6 +65,7 @@ function parsePurchases(text){
   return purchases;
 }
 
+// Parse claims
 function parseClaims(text){
   const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
   const claims=[];
@@ -73,11 +75,8 @@ function parseClaims(text){
     if(dateMatch){
       const ts = new Date(dateMatch[0]);
       if(i>=2){
-        const scgc = lines[i-2].split("\t");
-        let pack_name=null;
-        for(let amt in PACKS){
-          if(PACKS[amt]) pack_name=PACKS[amt].name;
-        }
+        let pack_name = null;
+        for(let amt in PACKS) pack_name = PACKS[amt].name;
         claims.push({claim_ts: ts, pack_name: pack_name});
       }
     }
@@ -85,36 +84,41 @@ function parseClaims(text){
   return claims;
 }
 
+// Compute intervals with extensions
 function computeIntervals(purchases){
   const intervals=[];
   for(let amt in PACKS){
     const packName = PACKS[amt].name;
     let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
     let currentStart = null;
-    let currentEnd = null;
     let subscriptionCount=0;
+    let currentEnd = null;
     for(let p of packPurchases){
       if(!currentStart){
         currentStart = p.purchase_ts;
         currentEnd = new Date(currentStart.getTime());
-        subscriptionCount++;
+        currentEnd.setDate(currentEnd.getDate()+7);
+        subscriptionCount=1;
       } else {
         if(p.purchase_ts <= currentEnd){
+          // Extend
+          currentEnd.setDate(currentEnd.getDate()+7);
           subscriptionCount++;
         } else {
-          intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount, claims: []});
+          intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount});
           currentStart = p.purchase_ts;
           currentEnd = new Date(currentStart.getTime());
-          subscriptionCount =1;
+          currentEnd.setDate(currentEnd.getDate()+7);
+          subscriptionCount=1;
         }
       }
-      currentEnd.setDate(currentEnd.getDate()+7);
     }
-    if(currentStart) intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount, claims: []});
+    if(currentStart) intervals.push({pack_name: packName, start_ts: currentStart, subscriptions: subscriptionCount});
   }
   return intervals;
 }
 
+// Compute Day windows
 function computeDayWindows(interval){
   const windows=[];
   let start = new Date(interval.start_ts);
@@ -134,31 +138,31 @@ function computeDayWindows(interval){
   return windows;
 }
 
-function mapClaims(interval, claims, totalMaxDays){
+// Map claims
+function mapClaims(interval, claims){
   const windows = computeDayWindows(interval);
   const results=[];
-  for(let i=0;i<totalMaxDays;i++){
-    const w = windows[i] || {day_label:`Day${i+1}`, start:null, end:null};
+  windows.forEach(d=>{
     let status="Missed";
-    if(w.start){
-      for(let c of claims){
-        if(c.pack_name===interval.pack_name && c.claim_ts>=w.start && c.claim_ts<w.end){
-          status=formatDate(c.claim_ts);
-          break;
-        }
+    for(let c of claims){
+      if(c.pack_name===interval.pack_name && c.claim_ts>=d.start && c.claim_ts<d.end){
+        status=formatDate(c.claim_ts);
+        break;
       }
     }
-    results.push({day_label:w.day_label, start:w.start, end:w.end, status});
-  }
+    results.push({day_label:d.day_label, start:d.start, end:d.end, status});
+  });
   return results;
 }
 
+// Create table
 function createTable(interval, dayResults){
   const table = document.createElement("table");
   const header = table.insertRow();
   const th = document.createElement("th");
   th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
+  // Total row
   const totalRow = table.insertRow();
   const cell1 = totalRow.insertCell();
   cell1.innerText = `Total: ${interval.subscriptions*7} day${interval.subscriptions*7>1?'s':''}`;
@@ -166,13 +170,15 @@ function createTable(interval, dayResults){
   cell1.className="main";
   totalRow.insertCell().className="blank";
 
+  // Start-End row
   const seRow = table.insertRow();
-  const endDate = dayResults.find(d=>d.start)?.end || new Date(interval.start_ts.getTime()+interval.subscriptions*7*24*60*60*1000);
+  const endDate = dayResults[dayResults.length-1].end;
   const seCell = seRow.insertCell();
   seCell.innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(endDate)}`;
   seCell.className="main";
   seRow.insertCell().className="blank";
 
+  // Subheader
   const subHeader = table.insertRow();
   const subCell = subHeader.insertCell();
   subCell.innerText="Day | Day Range | Status";
@@ -180,16 +186,12 @@ function createTable(interval, dayResults){
   subHeader.insertCell().className="blank";
   subHeader.className="subheader";
 
+  // Day rows
   dayResults.forEach(d=>{
     const row = table.insertRow();
     const cell = row.insertCell();
-    if(d.start && d.end){
-      cell.innerText=`${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)} | ${d.status}`;
-      cell.className = d.status!=="Missed" ? "claimed":"missed";
-    } else {
-      cell.innerText=`${d.day_label} | - | ${d.status}`;
-      cell.className="missed";
-    }
+    cell.innerText=`${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)} | ${d.status}`;
+    cell.className = d.status!=="Missed" ? "claimed":"missed";
     row.insertCell().className="blank";
     cell.className="main";
   });
@@ -197,21 +199,16 @@ function createTable(interval, dayResults){
   return table;
 }
 
+// Main analyzer
 function analyze(){
   const purchases = parsePurchases(document.getElementById("purchaseData").value);
   const claims = parseClaims(document.getElementById("claimData").value);
   const intervals = computeIntervals(purchases);
 
-  intervals.forEach(interval=>{
-    interval.claims = claims;
-  });
-
-  const totalMaxDays = Math.max(...intervals.map(i=>i.subscriptions*7));
-
   const resultsDiv = document.getElementById("results");
   resultsDiv.innerHTML="";
   intervals.forEach(interval=>{
-    const dayResults = mapClaims(interval, claims, totalMaxDays);
+    const dayResults = mapClaims(interval, claims);
     resultsDiv.appendChild(createTable(interval, dayResults));
   });
 }
