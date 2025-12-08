@@ -96,23 +96,28 @@ function computeIntervals(purchases){
     const packName = PACKS[amt].name;
     let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
     let currentInterval = null;
+
     for(let p of packPurchases){
-      let start = new Date(p.purchase_ts);
-      // Day1 end
+      const start = new Date(p.purchase_ts);
+
+      // Compute Day1 → Day7 end for this purchase
       let day1End = new Date(start);
       if(start.getHours()<8) day1End.setHours(8,0,0,0);
       else { day1End.setDate(day1End.getDate()+1); day1End.setHours(8,0,0,0);}
-      let end = new Date(day1End);
-      end.setDate(end.getDate() + SUB_DURATION_DAYS -1);
+      let purchaseEnd = new Date(day1End);
+      purchaseEnd.setDate(purchaseEnd.getDate() + SUB_DURATION_DAYS -1);
+
       if(!currentInterval){
-        currentInterval = {pack_name:packName, start_ts:start, end_ts:end};
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd};
       } else if(start <= currentInterval.end_ts){
-        if(end > currentInterval.end_ts) currentInterval.end_ts = end;
+        // extend the current interval
+        if(purchaseEnd > currentInterval.end_ts) currentInterval.end_ts = purchaseEnd;
       } else {
         intervals.push(currentInterval);
-        currentInterval = {pack_name:packName, start_ts:start, end_ts:end};
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd};
       }
     }
+
     if(currentInterval) intervals.push(currentInterval);
   }
   return intervals.sort((a,b)=>a.start_ts-b.start_ts);
@@ -144,12 +149,12 @@ function mapClaims(interval, claims){
     let claimFound = false;
     for(let c of claims.filter(cl=>cl.pack_name===interval.pack_name)){
       if(c.claim_ts >= w.start && c.claim_ts < w.end){
-        results.push({day_label:w.day_label, status:formatDate(c.claim_ts)});
+        results.push({day_label:w.day_label, start:w.start, end:w.end, status:formatDate(c.claim_ts)});
         claimFound = true;
         break;
       }
     }
-    if(!claimFound) results.push({day_label:w.day_label, status:"Missed"});
+    if(!claimFound) results.push({day_label:w.day_label, start:w.start, end:w.end, status:"Missed"});
   }
   return results;
 }
@@ -170,12 +175,12 @@ function createTable(interval, dayResults){
   seRow.insertCell().innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(interval.end_ts)}`;
   // Subheader
   const subHeader = table.insertRow();
-  const cell = subHeader.insertCell(); cell.innerText="Status"; subHeader.className="subheader";
+  const cell = subHeader.insertCell(); cell.innerText="Day Range | Status"; subHeader.className="subheader";
   // Day rows
   for(let d of dayResults){
     const row = table.insertRow();
     const cell = row.insertCell();
-    cell.innerText = d.status;
+    cell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}  ${d.status}`;
     if(d.status !== "Missed") cell.className="claimed";
     else cell.className="missed";
   }
