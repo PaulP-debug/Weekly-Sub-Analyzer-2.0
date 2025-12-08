@@ -8,13 +8,13 @@
   textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
   button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
   table { border-collapse: collapse; margin-bottom: 30px; width: 100%; }
-  th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; }
+  th, td { border:1px solid #333; padding:5px 10px; text-align:left; }
   th { background-color: #f2f2f2; }
-  .header { background-color: #d9edf7; font-weight: bold; text-align: center; }
-  .subheader { background-color: #fcf8e3; font-weight: bold; text-align: center; }
-  .claimed { background-color: #d4edda; color: #155724; }
-  .missed { background-color: #f8d7da; color: #721c24; }
-  .future { background-color: #e2e3e5; color: #6c757d; }
+  .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
+  .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
+  .claimed { background-color:#d4edda; color:#155724; }
+  .missed { background-color:#f8d7da; color:#721c24; }
+  .future { background-color:#e2e3e5; color:#6c757d; }
 </style>
 </head>
 <body>
@@ -33,22 +33,15 @@
 
 <script>
 const PACKS = {
-  7.00: {name: "Sub Pack 07", sc: 0.50, gc: 2000},
-  30.00: {name: "Sub Pack 30", sc: 2.00, gc: 10000},
-  90.00: {name: "Sub Pack 90", sc: 5.50, gc: 40000}
+  7.00: {name:"Sub Pack 07", sc:0.50, gc:2000},
+  30.00:{name:"Sub Pack 30", sc:2.00, gc:10000},
+  90.00:{name:"Sub Pack 90", sc:5.50, gc:40000}
 };
 const SUB_DURATION_DAYS = 7;
 
-// Format Date as YYYY-MM-DD HH:MM
 function formatDate(date){
-  if(!date) return "";
-  const pad = n => n.toString().padStart(2,"0");
-  const y = date.getFullYear();
-  const m = pad(date.getMonth()+1);
-  const d = pad(date.getDate());
-  const h = pad(date.getHours());
-  const min = pad(date.getMinutes());
-  return `${y}-${m}-${d} ${h}:${min}`;
+  const pad=n=>n.toString().padStart(2,"0");
+  return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 // Parse purchases
@@ -64,7 +57,7 @@ function parsePurchases(text){
       const amtMatch = nextLine.match(/\d+(\.\d+)?/);
       if(!amtMatch) continue;
       const amt = parseFloat(amtMatch[0]);
-      if(PACKS[amt]) purchases.push({purchase_ts: ts, pack_amount: amt, pack_name: PACKS[amt].name});
+      if(PACKS[amt]) purchases.push({purchase_ts:ts, pack_amount:amt, pack_name:PACKS[amt].name});
     }
   }
   return purchases;
@@ -74,11 +67,11 @@ function parsePurchases(text){
 function parseClaims(text){
   const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
   const claims = [];
-  for(let i=0; i<lines.length; i+=3){
+  for(let i=0;i<lines.length;i+=3){
     const scgcLine = lines[i].split("\t");
-    if(scgcLine.length < 2) continue;
-    const sc = parseFloat(scgcLine[0]);
-    const gc = parseInt(scgcLine[1]);
+    if(scgcLine.length<2) continue;
+    const sc=parseFloat(scgcLine[0]);
+    const gc=parseInt(scgcLine[1]);
     const dateLine = lines[i+2];
     if(!dateLine) continue;
     const dateMatch = dateLine.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
@@ -91,80 +84,108 @@ function parseClaims(text){
         break;
       }
     }
-    if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
+    if(pack_name) claims.push({claim_ts:ts, sc, gc, pack_name});
   }
   return claims;
 }
 
-// Compute Day1–Day7 windows
-function computeDayWindows(purchase_ts){
-  const windows=[];
-  const resetHour = 8;
-  
-  // Apply 08:00 cutoff for purchase
-  const start = new Date(purchase_ts);
-  if(start.getHours() < resetHour){
-    start.setDate(start.getDate() -1);
+// Compute extended intervals with Day1=Purchase->08:00
+function computeIntervals(purchases){
+  const intervals = [];
+  for(let amt in PACKS){
+    const packName = PACKS[amt].name;
+    let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt))
+                                 .sort((a,b)=>a.purchase_ts-b.purchase_ts);
+    let currentInterval = null;
+    for(let p of packPurchases){
+      // Day1 end = 08:00 same day
+      const start = new Date(p.purchase_ts);
+      const day1End = new Date(start);
+      day1End.setHours(8,0,0,0);
+      if(day1End < start) day1End.setDate(day1End.getDate()+1); // in case purchase after 08:00
+      const end = new Date(day1End);
+      end.setDate(end.getDate() + SUB_DURATION_DAYS - 1); // remaining 6 days from 08:00
+
+      if(!currentInterval){
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:end};
+      } else if(start <= currentInterval.end_ts){
+        // extend current interval
+        if(end > currentInterval.end_ts) currentInterval.end_ts = end;
+      } else {
+        intervals.push(currentInterval);
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:end};
+      }
+    }
+    if(currentInterval) intervals.push(currentInterval);
   }
-  
-  let prev = new Date(start);
-  for(let i=1;i<=SUB_DURATION_DAYS;i++){
-    const dayStart = new Date(prev);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() +1);
-    dayEnd.setHours(resetHour,0,0,0);
-    windows.push({day_label:`Day${i}`, start:dayStart, end:dayEnd});
-    prev = dayEnd;
-  }
-  return windows;
+  return intervals.sort((a,b)=>a.start_ts-b.start_ts);
 }
 
-// Map all claims to windows
+// Map claims to Day windows
 function mapClaims(interval, claims){
-  const windows = computeDayWindows(interval.purchase_ts);
-  const results=[];
-  
+  const windows = [];
+  const day1End = new Date(interval.start_ts);
+  day1End.setHours(8,0,0,0);
+  if(day1End < interval.start_ts) day1End.setDate(day1End.getDate()+1);
+
+  // Day1
+  windows.push({day_label:"Day1", start:interval.start_ts, end:day1End});
+  // Day2+
+  let prevEnd = new Date(day1End);
+  const totalDays = Math.ceil((interval.end_ts - interval.start_ts)/(1000*60*60*24));
+  for(let i=2;i<=totalDays;i++){
+    const dayStart = new Date(prevEnd);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate()+1);
+    windows.push({day_label:`Day${i}`, start:dayStart, end:dayEnd});
+    prevEnd = dayEnd;
+  }
+
+  const results = [];
+  const now = new Date();
   for(let w of windows){
     let status="Missed";
     for(let claim of claims.filter(c=>c.pack_name===interval.pack_name)){
-      const claimTime = new Date(claim.claim_ts);
-      // 08:00 cutoff for claim
-      if(claimTime.getHours()<8){
-        claimTime.setDate(claimTime.getDate()-1);
-      }
-      if(claimTime>=w.start && claimTime<w.end){
+      let claimTime = new Date(claim.claim_ts);
+      if(claimTime >= w.start && claimTime < w.end){
         status="Claimed";
         break;
       }
     }
-    // Future detection
-    const now = new Date();
     if(w.start > now) status="Future";
     results.push({day_label:w.day_label, status});
   }
-  
   return results;
 }
 
-// Create HTML table
+// Create table
 function createTable(interval, dayResults){
   const table = document.createElement("table");
 
+  // Header
   const header = table.insertRow();
-  const th = document.createElement("th"); 
-  th.colSpan = 1; 
-  th.className = "header"; 
-  th.innerText = interval.pack_name; 
-  header.appendChild(th);
+  const th = document.createElement("th"); th.colSpan=1; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
+  // Empty row
+  const emptyRow = table.insertRow();
+  emptyRow.insertCell().innerText = "";
+
+  // Total days
+  const totalRow = table.insertRow();
+  const totalCell = totalRow.insertCell();
+  totalCell.innerText = `Total: ${dayResults.length} day${dayResults.length>1?'s':''}`;
+  totalCell.style.backgroundColor = "#d1ecf1";
+  totalCell.style.fontWeight = "bold";
+
+  // Subscription start/end
   const pRow = table.insertRow();
-  pRow.insertCell().innerText = `Backend: ${formatDate(interval.purchase_ts)}`;
+  pRow.insertCell().innerText = `Start: ${formatDate(interval.start_ts)}  |  End: ${formatDate(interval.end_ts)}`;
 
+  // Subheader
   const subHeader = table.insertRow();
-  const cell1 = subHeader.insertCell();
-  cell1.innerText = "Backend";
-  subHeader.className = "subheader";
+  const cell = subHeader.insertCell(); cell.innerText="Status"; subHeader.className="subheader";
 
+  // Day rows
   for(let d of dayResults){
     const row = table.insertRow();
     const cell = row.insertCell();
@@ -176,13 +197,13 @@ function createTable(interval, dayResults){
   return table;
 }
 
-// Main analyzer
+// Main
 function analyze(){
   const purchases = parsePurchases(document.getElementById("purchaseData").value);
   const claims = parseClaims(document.getElementById("claimData").value);
   const resultsDiv = document.getElementById("results");
   resultsDiv.innerHTML="";
-  const intervals = purchases.sort((a,b)=>a.purchase_ts-b.purchase_ts);
+  const intervals = computeIntervals(purchases);
   for(let interval of intervals){
     const dayResults = mapClaims(interval, claims);
     resultsDiv.appendChild(createTable(interval, dayResults));
