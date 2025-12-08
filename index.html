@@ -8,16 +8,18 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: nowrap; }
-table { border-collapse: collapse; table-layout: fixed; width: 500px; }
+table { border-collapse: collapse; table-layout: fixed; width: 600px; }
 th, td { border: 1px solid #333; padding: 5px; text-align: left; height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; } /* green */
 .missed { background-color:#f8d7da; color:#721c24; }  /* red */
-td.day { width: 50px; }
-td.range { width: 320px; }
-td.status { width: 80px; }
+
+/* Force column widths */
+.col-day { width: 60px; }
+.col-range { width: 420px; }
+.col-status { width: 100px; }
 </style>
 </head>
 <body>
@@ -187,10 +189,14 @@ function createTable(interval, dayResults, maxDays){
 
   // Subheader row
   const subHeader = table.insertRow();
-  ["Day","Day Range","Status"].forEach(h=>{
+  const headers = ["Day","Day Range","Status"];
+  headers.forEach((h,i)=>{
     const cell = subHeader.insertCell();
     cell.innerText = h;
     cell.style.fontWeight="bold";
+    if(i===0) cell.className="col-day";
+    else if(i===1) cell.className="col-range";
+    else cell.className="col-status";
   });
   subHeader.className="subheader";
 
@@ -199,14 +205,13 @@ function createTable(interval, dayResults, maxDays){
     const row = table.insertRow();
     if(i<dayResults.length){
       const d = dayResults[i];
-      const dayCell = row.insertCell(); dayCell.innerText = d.day_label; dayCell.style.backgroundColor = getPeriodColor(i);
-      const rangeCell = row.insertCell(); rangeCell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}`; rangeCell.style.backgroundColor = getPeriodColor(i);
-      const statusCell = row.insertCell(); statusCell.innerText = d.status; statusCell.className = d.status!=="Missed"?"claimed":"missed"; statusCell.style.backgroundColor = getPeriodColor(i);
+      const dayCell = row.insertCell(); dayCell.innerText = d.day_label; dayCell.className="col-day"; dayCell.style.backgroundColor = getPeriodColor(i);
+      const rangeCell = row.insertCell(); rangeCell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}`; rangeCell.className="col-range"; rangeCell.style.backgroundColor = getPeriodColor(i);
+      const statusCell = row.insertCell(); statusCell.innerText = d.status; statusCell.className = d.status!=="Missed"?"claimed col-status":"missed col-status"; statusCell.style.backgroundColor = getPeriodColor(i);
     } else {
-      // Blank rows for alignment
-      row.insertCell().className="blank";
-      row.insertCell().className="blank";
-      row.insertCell().className="blank";
+      row.insertCell().className="col-day";
+      row.insertCell().className="col-range";
+      row.insertCell().className="col-status";
     }
   }
 
@@ -219,7 +224,6 @@ function analyze(){
   const claims = parseClaims(document.getElementById("claimData").value);
   const intervals = computeIntervals(purchases);
 
-  // Find max number of days among all subscriptions for alignment
   let maxDays = 0;
   const mappedResults = intervals.map(interval=>{
     const dayResults = mapClaims(interval, claims);
