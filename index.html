@@ -8,15 +8,15 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: nowrap; }
-table { border-collapse: collapse; width: 400px; table-layout: fixed; }
-th, td { border: 1px solid #333; padding: 5px; text-align: left; word-wrap: break-word; height: 30px; }
+table { border-collapse: collapse; table-layout: fixed; width: 550px; min-width: 550px; }
+th, td { border: 1px solid #333; padding: 5px; text-align: left; height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; }
 .missed { background-color:#f8d7da; color:#721c24; }
 td.blank { background-color:#fff; width: 20px; }
-td.main { width: 380px; } /* Column 1 wider */
+td.main { width: 520px; } /* Column 1 wider to prevent wrapping */
 </style>
 </head>
 <body>
