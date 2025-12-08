@@ -89,54 +89,59 @@ function parseClaims(text){
   return claims;
 }
 
-// Compute merged intervals
+// Compute merged intervals with extension
 function computeIntervals(purchases){
   const intervals = [];
   for(let amt in PACKS){
     const packName = PACKS[amt].name;
     let packPurchases = purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
     let currentInterval = null;
+    let subscriptionCount = 0;
 
     for(let p of packPurchases){
       const start = new Date(p.purchase_ts);
-
-      // Compute Day1 → Day7 end for this purchase
+      // Day1 end
       let day1End = new Date(start);
       if(start.getHours()<8) day1End.setHours(8,0,0,0);
       else { day1End.setDate(day1End.getDate()+1); day1End.setHours(8,0,0,0);}
+      // Purchase end = Day7 of this subscription
       let purchaseEnd = new Date(day1End);
       purchaseEnd.setDate(purchaseEnd.getDate() + SUB_DURATION_DAYS -1);
 
       if(!currentInterval){
-        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd};
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd, subscriptions:1};
       } else if(start <= currentInterval.end_ts){
-        // extend the current interval
-        if(purchaseEnd > currentInterval.end_ts) currentInterval.end_ts = purchaseEnd;
+        // extend current interval
+        currentInterval.end_ts.setDate(currentInterval.end_ts.getDate() + SUB_DURATION_DAYS);
+        currentInterval.subscriptions += 1;
       } else {
         intervals.push(currentInterval);
-        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd};
+        currentInterval = {pack_name:packName, start_ts:start, end_ts:purchaseEnd, subscriptions:1};
       }
     }
-
     if(currentInterval) intervals.push(currentInterval);
   }
   return intervals.sort((a,b)=>a.start_ts-b.start_ts);
 }
 
-// Compute Day windows
+// Compute Day windows for an interval
 function computeDayWindows(interval){
   const windows = [];
-  let day1End = new Date(interval.start_ts);
-  if(interval.start_ts.getHours()<8) day1End.setHours(8,0,0,0);
-  else { day1End.setDate(day1End.getDate()+1); day1End.setHours(8,0,0,0);}
-  windows.push({day_label:"Day1", start:interval.start_ts, end:day1End});
-  let prevEnd = new Date(day1End);
-  while(prevEnd < interval.end_ts){
-    const dayStart = new Date(prevEnd);
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate()+1);
-    windows.push({day_label:`Day${windows.length+1}`, start:dayStart, end:dayEnd});
-    prevEnd = dayEnd;
+  let start = new Date(interval.start_ts);
+  let dayCount = interval.subscriptions * SUB_DURATION_DAYS;
+
+  for(let i=0;i<dayCount;i++){
+    let dayEnd = new Date(start);
+    if(i===0){
+      // Day1 end rule
+      if(start.getHours()<8) dayEnd.setHours(8,0,0,0);
+      else { dayEnd.setDate(dayEnd.getDate()+1); dayEnd.setHours(8,0,0,0);}
+    } else {
+      dayEnd.setDate(dayEnd.getDate()+1);
+      dayEnd.setHours(8,0,0,0);
+    }
+    windows.push({day_label:`Day${i+1}`, start:new Date(start), end:dayEnd});
+    start = new Date(dayEnd);
   }
   return windows;
 }
@@ -162,25 +167,39 @@ function mapClaims(interval, claims){
 // Create table
 function createTable(interval, dayResults){
   const table = document.createElement("table");
+
   // Header
   const header = table.insertRow();
-  const th = document.createElement("th"); th.colSpan=1; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
+  const th = document.createElement("th"); 
+  th.colSpan=1; 
+  th.className="header"; 
+  th.innerText=interval.pack_name; 
+  header.appendChild(th);
+
   // Empty row under header
   const emptyRow = table.insertRow(); emptyRow.insertCell().innerText="";
+
   // Total days
   const totalRow = table.insertRow();
-  const totalCell = totalRow.insertCell(); totalCell.innerText = `Total: ${dayResults.length} day${dayResults.length>1?'s':''}`; totalCell.style.backgroundColor="#d1ecf1"; totalCell.style.fontWeight="bold";
+  const totalCell = totalRow.insertCell(); 
+  totalCell.innerText = `Total: ${interval.subscriptions * SUB_DURATION_DAYS} day${interval.subscriptions * SUB_DURATION_DAYS>1?'s':''}`; 
+  totalCell.style.backgroundColor="#d1ecf1"; totalCell.style.fontWeight="bold";
+
   // Start/end row
   const seRow = table.insertRow();
   seRow.insertCell().innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(interval.end_ts)}`;
+
   // Subheader
   const subHeader = table.insertRow();
-  const cell = subHeader.insertCell(); cell.innerText="Day Range | Status"; subHeader.className="subheader";
+  const cell = subHeader.insertCell(); 
+  cell.innerText="Day | Day Range | Status"; 
+  subHeader.className="subheader";
+
   // Day rows
   for(let d of dayResults){
     const row = table.insertRow();
     const cell = row.insertCell();
-    cell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}  ${d.status}`;
+    cell.innerText = `${d.day_label} | ${formatDate(d.start)} → ${formatDate(d.end)}  ${d.status}`;
     if(d.status !== "Missed") cell.className="claimed";
     else cell.className="missed";
   }
