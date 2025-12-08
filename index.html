@@ -24,7 +24,7 @@
 <label>Paste Purchase Data (7-column table, tab-separated):</label>
 <textarea id="purchaseData"></textarea>
 
-<label>Paste Claim Data (9-column table, multi-line):</label>
+<label>Paste Claim Data (3-line repeating pattern per claim):</label>
 <textarea id="claimData"></textarea>
 
 <button onclick="analyze()">Analyze</button>
@@ -70,26 +70,28 @@ function parsePurchases(text){
   return purchases;
 }
 
-// Parse claims
+// Parse claims (for 3-line repeating pattern)
 function parseClaims(text){
   const lines = text.trim().split('\n').map(l=>l.trim()).filter(l=>l);
-  const claims=[];
-  for(let i=0;i<lines.length;i++){
-    const line = lines[i];
-    const dateMatch = line.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
-    if(dateMatch){
-      if(i<2) continue; 
-      const scgcLine = lines[i-2].split("\t");
-      if(scgcLine.length<2) continue;
-      const sc=parseFloat(scgcLine[0]);
-      const gc=parseInt(scgcLine[1]);
-      const ts=new Date(dateMatch[0]);
-      let pack_name=null;
-      for(let amt in PACKS){
-        if(PACKS[amt].sc===sc && PACKS[amt].gc===gc){ pack_name=PACKS[amt].name; break; }
+  const claims = [];
+  for(let i=0; i<lines.length; i+=3){
+    const scgcLine = lines[i].split("\t");
+    if(scgcLine.length < 2) continue; // skip malformed
+    const sc = parseFloat(scgcLine[0]);
+    const gc = parseInt(scgcLine[1]);
+    const dateLine = lines[i+2];
+    if(!dateLine) continue;
+    const dateMatch = dateLine.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/);
+    if(!dateMatch) continue;
+    const ts = new Date(dateMatch[0]);
+    let pack_name = null;
+    for(let amt in PACKS){
+      if(PACKS[amt].sc === sc && PACKS[amt].gc === gc){
+        pack_name = PACKS[amt].name;
+        break;
       }
-      if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
     }
+    if(pack_name) claims.push({claim_ts: ts, sc, gc, pack_name});
   }
   return claims;
 }
@@ -107,7 +109,7 @@ function computeIntervals(purchases){
   return intervals.sort((a,b)=>a.purchase_ts-b.purchase_ts);
 }
 
-// Compute Day1-Day7 windows based on Backend reset at 08:00 UTC
+// Compute Day1-Day7 windows based on 08:00 backend reset
 function computeDayWindows(purchase_ts){
   const windows=[];
   const resetHour = 8; // 08:00 Backend
@@ -151,7 +153,7 @@ function mapClaims(interval, claims){
       const claimHour = claim.claim_ts.getUTCHours();
       const claimDate = new Date(claim.claim_ts);
 
-      // 08:00 cutoff
+      // 08:00 cutoff: before 08:00 -> previous day
       if(claimHour < 8){
         claimDate.setUTCDate(claimDate.getUTCDate() - 1);
       }
