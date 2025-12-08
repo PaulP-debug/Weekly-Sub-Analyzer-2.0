@@ -39,7 +39,7 @@ const PACKS = {
 };
 const SUB_DURATION_DAYS = 7;
 
-// Format Date as YYYY-MM-DD HH:MM (UTC)
+// Format Date as YYYY-MM-DD HH:MM
 function formatDate(date){
   if(!date) return "";
   const pad = n => n.toString().padStart(2,"0");
@@ -49,11 +49,6 @@ function formatDate(date){
   const h = pad(date.getUTCHours());
   const min = pad(date.getUTCMinutes());
   return `${y}-${m}-${d} ${h}:${min}`;
-}
-
-// UTC-8 conversion
-function toUTC8(date){
-  return new Date(date.getTime() - 8*3600*1000);
 }
 
 // Parse purchases
@@ -105,36 +100,34 @@ function computeIntervals(purchases){
   for(let amt in PACKS){
     const packName=PACKS[amt].name;
     let packPurchases=purchases.filter(p=>p.pack_amount==parseFloat(amt)).sort((a,b)=>a.purchase_ts-b.purchase_ts);
-    let currentEnd=null;
     for(let p of packPurchases){
-      let start=p.purchase_ts;
-      if(currentEnd && start<=currentEnd) start=currentEnd;
       intervals.push({pack_name: packName, pack_amount: parseFloat(amt), purchase_ts:p.purchase_ts});
-      currentEnd=start;
     }
   }
   return intervals.sort((a,b)=>a.purchase_ts-b.purchase_ts);
 }
 
-// Compute Day1-Day7 windows based on Backend reset at 08:00 UTC-0
+// Compute Day1-Day7 windows based on Backend reset at 08:00 UTC
 function computeDayWindows(purchase_ts){
   const windows=[];
   const resetHour = 8; // 08:00 Backend
-  const day1Start = purchase_ts;
+  const day1Start = new Date(purchase_ts);
+  
+  // Day1 end = next 08:00
   const day1End = new Date(day1Start);
-  if(day1Start.getUTCHours()<resetHour || (day1Start.getUTCHours()===resetHour && day1Start.getUTCMinutes()===0)){
+  if(day1Start.getUTCHours() < resetHour || (day1Start.getUTCHours() === resetHour && day1Start.getUTCMinutes() === 0)){
     day1End.setUTCHours(resetHour,0,0,0);
   } else {
-    day1End.setUTCDate(day1End.getUTCDate()+1);
+    day1End.setUTCDate(day1End.getUTCDate() + 1);
     day1End.setUTCHours(resetHour,0,0,0);
   }
   windows.push({day_label:"Day1", start:day1Start, end:day1End});
 
   let prevEnd = day1End;
-  for(let i=2;i<=SUB_DURATION_DAYS;i++){
+  for(let i=2; i<=SUB_DURATION_DAYS; i++){
     let dayStart = new Date(prevEnd);
     let dayEnd = new Date(dayStart);
-    dayEnd.setUTCDate(dayEnd.getUTCDate()+1);
+    dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
     windows.push({day_label:`Day${i}`, start:dayStart, end:dayEnd});
     prevEnd = dayEnd;
   }
@@ -146,72 +139,87 @@ function computeDayWindows(purchase_ts){
 function mapClaims(interval, claims){
   const windows = computeDayWindows(interval.purchase_ts);
   const results=[];
-  const now=new Date(); // current Backend time
+
   for(let w of windows){
-    const claim = claims.find(c=>c.pack_name===interval.pack_name && c.claim_ts>=w.start && c.claim_ts<w.end);
-    let status="", backend=null, pst=null;
+    // Find all claims for this pack
+    const claim = claims.find(c => c.pack_name === interval.pack_name);
+
+    let status="", claimTime=null;
+
     if(claim){
-      status="Claimed";
-      backend=claim.claim_ts;
-      pst=toUTC8(claim.claim_ts);
-    } else if(w.start>now){
-      status="Future";
-    } else {
-      status="Missed";
+      // Determine which day this claim belongs to
+      const claimHour = claim.claim_ts.getUTCHours();
+      const claimDate = new Date(claim.claim_ts);
+
+      // 08:00 cutoff
+      if(claimHour < 8){
+        claimDate.setUTCDate(claimDate.getUTCDate() - 1);
+      }
+
+      // Check if claim falls into this day window
+      if(claimDate >= w.start && claimDate < w.end){
+        status="Claimed";
+        claimTime = claim.claim_ts;
+      }
     }
-    results.push({day_label:w.day_label, status, claim_utc0:backend, claim_utc8:pst});
+
+    if(!status){
+      const now = new Date();
+      if(w.start > now){
+        status="Future";
+      } else {
+        status="Missed";
+      }
+    }
+
+    results.push({day_label: w.day_label, status, claim_utc0: claimTime});
   }
+
   return results;
 }
 
-// Create HTML table
+// Create HTML table (single column)
 function createTable(interval, dayResults){
-  const table=document.createElement("table");
+  const table = document.createElement("table");
 
-  // Row 1: Main header
-  const header=table.insertRow();
-  const th=document.createElement("th"); 
-  th.colSpan=2; 
-  th.className="header"; 
-  th.innerText=interval.pack_name; 
+  // Row 1: Header
+  const header = table.insertRow();
+  const th = document.createElement("th"); 
+  th.colSpan = 1; 
+  th.className = "header"; 
+  th.innerText = interval.pack_name; 
   header.appendChild(th);
 
   // Row 2: Purchase info
-  const pRow=table.insertRow();
-  pRow.insertCell().innerText=`Backend: ${formatDate(interval.purchase_ts)}`;
-  pRow.insertCell().innerText=`Server Time: ${formatDate(toUTC8(interval.purchase_ts))}`;
+  const pRow = table.insertRow();
+  pRow.insertCell().innerText = `Backend: ${formatDate(interval.purchase_ts)}`;
 
-  // Row 3: Days header
-  const subHeader=table.insertRow();
-  const cell1=subHeader.insertCell();
-  cell1.innerText="Backend (UTC-0)";
-  const cell2=subHeader.insertCell();
-  cell2.innerText="PST (UTC-8)";
-  subHeader.className="subheader";
+  // Row 3: Day header
+  const subHeader = table.insertRow();
+  const cell1 = subHeader.insertCell();
+  cell1.innerText = "Backend (UTC-0)";
+  subHeader.className = "subheader";
 
   // Rows 4-10: Day1-Day7
-  dayResults.forEach(d=>{
-    const row=table.insertRow();
-    let backendText="", pstText="", cls="";
-    if(d.status==="Claimed"){
-      backendText=formatDate(d.claim_utc0);
-      pstText=formatDate(d.claim_utc8);
-      cls="claimed";
-    } else if(d.status==="Missed"){
-      backendText="Missed";
-      pstText="Missed";
-      cls="missed";
-    } else if(d.status==="Future"){
-      backendText="Future";
-      pstText="Future";
-      cls="future";
+  dayResults.forEach(d => {
+    const row = table.insertRow();
+    let text = "";
+    let cls = "";
+
+    if(d.status === "Claimed"){
+      text = formatDate(d.claim_utc0);
+      cls = "claimed";
+    } else if(d.status === "Missed"){
+      text = "Missed";
+      cls = "missed";
+    } else if(d.status === "Future"){
+      text = "Future";
+      cls = "future";
     }
-    const c1=row.insertCell();
-    c1.innerText=backendText;
-    const c2=row.insertCell();
-    c2.innerText=pstText;
-    c1.className=cls;
-    c2.className=cls;
+
+    const c1 = row.insertCell();
+    c1.innerText = text;
+    c1.className = cls;
   });
 
   return table;
@@ -219,14 +227,14 @@ function createTable(interval, dayResults){
 
 // Main analyzer
 function analyze(){
-  const purchases=parsePurchases(document.getElementById("purchaseData").value);
-  const claims=parseClaims(document.getElementById("claimData").value);
-  const resultsDiv=document.getElementById("results");
+  const purchases = parsePurchases(document.getElementById("purchaseData").value);
+  const claims = parseClaims(document.getElementById("claimData").value);
+  const resultsDiv = document.getElementById("results");
   resultsDiv.innerHTML="";
-  const intervals=computeIntervals(purchases);
+  const intervals = computeIntervals(purchases);
   intervals.forEach(interval=>{
-    const dayResults=mapClaims(interval,claims);
-    resultsDiv.appendChild(createTable(interval,dayResults));
+    const dayResults = mapClaims(interval, claims);
+    resultsDiv.appendChild(createTable(interval, dayResults));
   });
 }
 </script>
