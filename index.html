@@ -7,16 +7,16 @@
 body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
-.flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-table { border-collapse: collapse; width: 580px; min-width: 580px; table-layout: fixed; }
-th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; word-wrap: break-word; height: 30px; }
+.flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: nowrap; }
+table { border-collapse: collapse; width: 400px; table-layout: fixed; }
+th, td { border: 1px solid #333; padding: 5px; text-align: left; word-wrap: break-word; height: 30px; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; }
 .missed { background-color:#f8d7da; color:#721c24; }
 td.blank { background-color:#fff; width: 20px; }
-td.main { width: 560px; } /* Column 1 wider */
+td.main { width: 380px; } /* Column 1 wider */
 </style>
 </head>
 <body>
@@ -101,7 +101,6 @@ function computeIntervals(purchases){
         subscriptionCount=1;
       } else {
         if(p.purchase_ts <= currentEnd){
-          // Extend
           currentEnd.setDate(currentEnd.getDate()+7);
           subscriptionCount++;
         } else {
@@ -161,6 +160,11 @@ function createTable(interval, dayResults){
   const header = table.insertRow();
   const th = document.createElement("th");
   th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
+
+  // Blank column under header
+  const blankRow = table.insertRow();
+  blankRow.insertCell().className="blank";
+  blankRow.insertCell().className="blank";
 
   // Total row
   const totalRow = table.insertRow();
