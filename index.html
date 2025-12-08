@@ -8,17 +8,16 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: nowrap; }
-table { border-collapse: collapse; table-layout: fixed; width: 600px; min-width: 600px; }
+table { border-collapse: collapse; table-layout: fixed; width: 500px; }
 th, td { border: 1px solid #333; padding: 5px; text-align: left; height: 30px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
 .subheader { background-color:#fcf8e3; font-weight:bold; text-align:center; }
 .claimed { background-color:#d4edda; color:#155724; } /* green */
 .missed { background-color:#f8d7da; color:#721c24; }  /* red */
-td.blank { background-color:#fff; width: 20px; }
-td.day { width: 80px; }
-td.range { width: 280px; }
-td.status { width: 160px; }
+td.day { width: 50px; }
+td.range { width: 320px; }
+td.status { width: 80px; }
 </style>
 </head>
 <body>
@@ -164,63 +163,52 @@ function getPeriodColor(dayIndex){
 }
 
 // Create table
-function createTable(interval, dayResults){
+function createTable(interval, dayResults, maxDays){
   const table = document.createElement("table");
 
   // Header
   const header = table.insertRow();
   const th = document.createElement("th");
-  th.colSpan=4; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
-
-  // Blank row under header
-  const blankRow = table.insertRow();
-  blankRow.insertCell().className="blank";
-  blankRow.insertCell().className="blank";
-  blankRow.insertCell().className="blank";
-  blankRow.insertCell().className="blank";
+  th.colSpan=3; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
   // Total row
   const totalRow = table.insertRow();
   const cell1 = totalRow.insertCell();
-  cell1.colSpan = 4;
+  cell1.colSpan = 3;
   cell1.innerText = `Total: ${interval.subscriptions*7} day${interval.subscriptions*7>1?'s':''}`;
   cell1.style.backgroundColor="#d1ecf1"; cell1.style.fontWeight="bold";
 
   // Start-End row
   const seRow = table.insertRow();
   const seCell = seRow.insertCell();
-  seCell.colSpan = 4;
+  seCell.colSpan = 3;
   const endDate = dayResults[dayResults.length-1].end;
   seCell.innerText = `Start: ${formatDate(interval.start_ts)} | End: ${formatDate(endDate)}`;
 
   // Subheader row
   const subHeader = table.insertRow();
-  ["Day","Day Range","Status",""].forEach(h=>{
+  ["Day","Day Range","Status"].forEach(h=>{
     const cell = subHeader.insertCell();
     cell.innerText = h;
-    if(h!=="") cell.style.fontWeight="bold";
+    cell.style.fontWeight="bold";
   });
   subHeader.className="subheader";
 
   // Day rows
-  dayResults.forEach((d,index)=>{
+  for(let i=0;i<maxDays;i++){
     const row = table.insertRow();
-
-    const dayCell = row.insertCell();
-    dayCell.innerText = d.day_label;
-    dayCell.style.backgroundColor = getPeriodColor(index);
-
-    const rangeCell = row.insertCell();
-    rangeCell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}`;
-    rangeCell.style.backgroundColor = getPeriodColor(index);
-
-    const statusCell = row.insertCell();
-    statusCell.innerText = d.status;
-    statusCell.className = d.status!=="Missed" ? "claimed":"missed";
-    statusCell.style.backgroundColor = getPeriodColor(index);
-
-    row.insertCell().className="blank";
-  });
+    if(i<dayResults.length){
+      const d = dayResults[i];
+      const dayCell = row.insertCell(); dayCell.innerText = d.day_label; dayCell.style.backgroundColor = getPeriodColor(i);
+      const rangeCell = row.insertCell(); rangeCell.innerText = `${formatDate(d.start)} → ${formatDate(d.end)}`; rangeCell.style.backgroundColor = getPeriodColor(i);
+      const statusCell = row.insertCell(); statusCell.innerText = d.status; statusCell.className = d.status!=="Missed"?"claimed":"missed"; statusCell.style.backgroundColor = getPeriodColor(i);
+    } else {
+      // Blank rows for alignment
+      row.insertCell().className="blank";
+      row.insertCell().className="blank";
+      row.insertCell().className="blank";
+    }
+  }
 
   return table;
 }
@@ -231,11 +219,18 @@ function analyze(){
   const claims = parseClaims(document.getElementById("claimData").value);
   const intervals = computeIntervals(purchases);
 
+  // Find max number of days among all subscriptions for alignment
+  let maxDays = 0;
+  const mappedResults = intervals.map(interval=>{
+    const dayResults = mapClaims(interval, claims);
+    if(dayResults.length>maxDays) maxDays = dayResults.length;
+    return {interval, dayResults};
+  });
+
   const resultsDiv = document.getElementById("results");
   resultsDiv.innerHTML="";
-  intervals.forEach(interval=>{
-    const dayResults = mapClaims(interval, claims);
-    resultsDiv.appendChild(createTable(interval, dayResults));
+  mappedResults.forEach(({interval, dayResults})=>{
+    resultsDiv.appendChild(createTable(interval, dayResults, maxDays));
   });
 }
 </script>
