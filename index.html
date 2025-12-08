@@ -8,7 +8,7 @@ body { font-family: Arial, sans-serif; padding: 20px; }
 textarea { width: 100%; height: 120px; margin-bottom: 10px; font-family: monospace; }
 button { padding: 10px 20px; font-size: 16px; margin-bottom: 20px; }
 .flex-container { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-table { border-collapse: collapse; width: 500px; min-width: 500px; table-layout: fixed; }
+table { border-collapse: collapse; width: 600px; min-width: 600px; table-layout: fixed; }
 th, td { border: 1px solid #333; padding: 5px 10px; text-align: left; word-wrap: break-word; }
 th { background-color: #f2f2f2; }
 .header { background-color:#d9edf7; font-weight:bold; text-align:center; }
@@ -16,7 +16,7 @@ th { background-color: #f2f2f2; }
 .claimed { background-color:#d4edda; color:#155724; }
 .missed { background-color:#f8d7da; color:#721c24; }
 td.blank { background-color:#fff; width: 20px; }
-td.main { width: 460px; }
+td.main { width: 580px; } /* Column 1 doubled */
 </style>
 </head>
 <body>
@@ -46,7 +46,6 @@ function formatDate(date){
   return `${date.getFullYear()}-${pad(date.getMonth()+1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-// Parse purchase data
 function parsePurchases(text){
   const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
   const purchases=[];
@@ -65,7 +64,6 @@ function parsePurchases(text){
   return purchases;
 }
 
-// Parse claim data
 function parseClaims(text){
   const lines = text.trim().split("\n").map(l=>l.trim()).filter(l=>l);
   const claims=[];
@@ -76,8 +74,6 @@ function parseClaims(text){
       const ts = new Date(dateMatch[0]);
       if(i>=2){
         const scgc = lines[i-2].split("\t");
-        const sc = parseFloat(scgc[0]);
-        const gc = parseInt(scgc[1]);
         let pack_name=null;
         for(let amt in PACKS){
           if(PACKS[amt]) pack_name=PACKS[amt].name;
@@ -89,7 +85,6 @@ function parseClaims(text){
   return claims;
 }
 
-// Compute intervals with extension
 function computeIntervals(purchases){
   const intervals=[];
   for(let amt in PACKS){
@@ -120,7 +115,6 @@ function computeIntervals(purchases){
   return intervals;
 }
 
-// Compute day windows
 function computeDayWindows(interval){
   const windows=[];
   let start = new Date(interval.start_ts);
@@ -140,7 +134,6 @@ function computeDayWindows(interval){
   return windows;
 }
 
-// Map claims
 function mapClaims(interval, claims, totalMaxDays){
   const windows = computeDayWindows(interval);
   const results=[];
@@ -160,14 +153,12 @@ function mapClaims(interval, claims, totalMaxDays){
   return results;
 }
 
-// Create table
 function createTable(interval, dayResults){
   const table = document.createElement("table");
   const header = table.insertRow();
   const th = document.createElement("th");
   th.colSpan=2; th.className="header"; th.innerText=interval.pack_name; header.appendChild(th);
 
-  // Total row
   const totalRow = table.insertRow();
   const cell1 = totalRow.insertCell();
   cell1.innerText = `Total: ${interval.subscriptions*7} day${interval.subscriptions*7>1?'s':''}`;
@@ -175,7 +166,6 @@ function createTable(interval, dayResults){
   cell1.className="main";
   totalRow.insertCell().className="blank";
 
-  // Start/End row
   const seRow = table.insertRow();
   const endDate = dayResults.find(d=>d.start)?.end || new Date(interval.start_ts.getTime()+interval.subscriptions*7*24*60*60*1000);
   const seCell = seRow.insertCell();
@@ -183,7 +173,6 @@ function createTable(interval, dayResults){
   seCell.className="main";
   seRow.insertCell().className="blank";
 
-  // Subheader
   const subHeader = table.insertRow();
   const subCell = subHeader.insertCell();
   subCell.innerText="Day | Day Range | Status";
@@ -191,7 +180,6 @@ function createTable(interval, dayResults){
   subHeader.insertCell().className="blank";
   subHeader.className="subheader";
 
-  // Day rows
   dayResults.forEach(d=>{
     const row = table.insertRow();
     const cell = row.insertCell();
@@ -209,7 +197,6 @@ function createTable(interval, dayResults){
   return table;
 }
 
-// Main analyzer
 function analyze(){
   const purchases = parsePurchases(document.getElementById("purchaseData").value);
   const claims = parseClaims(document.getElementById("claimData").value);
