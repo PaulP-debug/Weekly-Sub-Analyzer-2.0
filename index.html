@@ -180,10 +180,12 @@ function createTable(interval, totalDays, claims){
 
     let matchedClaim = claims.find(c=>c.pack_amount===interval.pack_amount && c.claim_ts>=r.start && c.claim_ts<=r.end);
     if(matchedClaim){
-      statusCell.innerText = formatDate(matchedClaim.claim_ts);
+      // Status: "Claimed: YYYY-MM-DD HH:MM"
+      const claimText = formatDate(matchedClaim.claim_ts);
+      statusCell.innerText = `Claimed: ${claimText}`;
       statusCell.className = "claimed";
 
-      // PST = Column3 minus 8 hours (adjusts date automatically)
+      // PST = Column3 minus 8 hours (date adjusts automatically)
       let pstDate = new Date(matchedClaim.claim_ts);
       pstDate.setHours(pstDate.getHours() - 8);
       pstCell.innerText = formatDate(pstDate);
@@ -210,7 +212,7 @@ function analyze(){
     const packName = PACKS[amt].name;
     let packPurchases = purchases.filter(p=>p.pack_amount===parseFloat(amt));
     if(packPurchases.length===0){
-      const emptyInterval = {pack_name: packName, pack_amount: parseFloat(amt), purchase_ts:new Date()};
+      const emptyInterval = {pack_name: packName, pack_amount:parseFloat(amt), purchase_ts:new Date()};
       resultsDiv.appendChild(createTable(emptyInterval, 0, claims));
       continue;
     }
