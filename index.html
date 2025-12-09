@@ -165,7 +165,7 @@ function createTable(interval, totalDays, claims){
 
   // Row 3: Column headers
   let row3=table.insertRow();
-  ["Day","Day Range","Status","PST (Server Time)"].forEach(h=>{
+  ["Day","Day Range","Status","Server Time"].forEach(h=>{
     let th=document.createElement("th"); th.innerText=h; row3.appendChild(th);
   });
 
@@ -185,7 +185,7 @@ function createTable(interval, totalDays, claims){
       statusCell.innerText = `Claimed: ${claimText}`;
       statusCell.className = "claimed";
 
-      // PST = Column3 minus 8 hours (date adjusts automatically)
+      // Server Time = Column3 minus 8 hours (date adjusts automatically)
       let pstDate = new Date(matchedClaim.claim_ts);
       pstDate.setHours(pstDate.getHours() - 8);
       pstCell.innerText = formatDate(pstDate);
